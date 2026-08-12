@@ -1,0 +1,31 @@
+version: '3.8'
+
+services:
+  # 1. BROKER MQTT (Requerimiento del entregable)
+  mosquitto:
+    image: eclipse-mosquitto:2.0.15 # Usamos una versión específica estable de la industria
+    container_name: iot_mosquitto_broker
+    ports:
+      # Exponemos el puerto 1883 hacia tu computadora para que puedas usar 
+      # los scripts (send-temp.sh) y clientes como MQTT Explorer desde tu PC local.
+      - "1883:1883"
+    volumes:
+      # Inyectamos el archivo de configuración para permitir conexiones sin contraseña 
+      # (necesario para Mosquitto 2.0+ en entornos de desarrollo local).
+      - ./mosquitto.conf:/mosquitto/config/mosquitto.conf
+    restart: unless-stopped # Si se cae o reinicias Docker, se vuelve a levantar.
+
+  # 2. SUSCRIPTOR JAVA (Construido desde nuestro Dockerfile)
+  java-subscriber:
+    build:
+      # Le indicamos a Docker que salga de la carpeta /docker, entre a /src/subscriber 
+      # y use el Dockerfile que creamos allí para compilar el código.
+      context: ../src/subscriber
+      dockerfile: Dockerfile
+    container_name: iot_java_subscriber
+    depends_on:
+      # Esto asegura que Docker levante primero el broker antes de levantar el Java.
+      - mosquitto
+    restart: on-failure
+    # on-failure es clave aquí: si el Java arranca milisegundos más rápido que el broker 
+    # y falla al conectar en el primer intento, Docker lo reiniciará automáticamente.
