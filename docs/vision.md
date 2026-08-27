@@ -1,19 +1,19 @@
 # Documento de Visión del Producto
 **Proyecto:** Prototipo Exploratorio de Domótica - IoTEste
-**Iteración:** 1
-**Fecha:** Iteración inicial
+**Iteración:** 2 (Versión 2)
+**Fecha:** Iteración 2
 
 ---
 
 ## 1. Declaración de Visión (Plantilla de Moore)
 
-* **PARA** dueños de hogares y administradores de oficinas modernas.
-* **QUE** necesitan optimizar y automatizar el alto consumo eléctrico de su calefacción por losa radiante sin sacrificar el confort ambiental.
-* **EL** sistema automatizado de IoTEste (nombre en clave temporal: *SmartRadiant*).
-* **ES UN** producto de software de domótica basado en IoT y protocolos de mensajería MQTT.
-* **QUE** ajusta dinámicamente el estado de la calefacción basándose en lecturas ambientales en tiempo real, al mismo tiempo que audita el consumo de energía eléctrica para evitar gastos innecesarios.
-* **A DIFERENCIA DE** los termostatos tradicionales aislados, o los sistemas de domótica cerrados de alto costo que obligan al usuario a depender de servicios en la nube de terceros.
-* **NUESTRO PRODUCTO** capitaliza hardware estándar y abierto (dispositivos Shelly) gestionado por una arquitectura de software propia, local, escalable y contenerizada, garantizando soberanía de datos y ofreciendo una propuesta de valor única para potenciales inversores.
+* **PARA** hogares y oficinas con calefacción por losa radiante.
+* **QUE** buscan maximizar su confort y también optimizar su consumo eléctrico.
+* **EL** software IoTEste EcoWarm.
+* **ES UN** componente de una solución de domótica.
+* **QUE** realiza la gestión inteligente de sensores y switches.
+* **A DIFERENCIA DE** otras soluciones de domótica que sólo automatizan algunas acciones.
+* **NUESTRO PRODUCTO** realiza la gestión del consumo eléctrico en forma inteligente optimizando el consumo según las tarifas disponibles en nuestro mercado.
 
 ---
 
