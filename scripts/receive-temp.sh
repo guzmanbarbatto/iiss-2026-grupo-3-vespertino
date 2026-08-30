@@ -18,4 +18,4 @@ echo "------------------------------------------"
 # -t "#"       : Se suscribe a todos los tópicos disponibles.
 # -v           : Modo detallado (verbose), imprime el nombre del tópico junto al mensaje JSON.
 
-docker exec -it iot_mosquitto_broker mosquitto_sub -h localhost -p 1883 -t "#" -v
+docker exec iot_mosquitto_broker mosquitto_sub -h localhost -p 1883 -t "#" -v

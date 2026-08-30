@@ -13,7 +13,7 @@ echo "Enviando telemetría al tópico: shelly/ht/room1/status"
 echo "------------------------------------------"
 
 # Definimos el mensaje JSON con datos simulados
-PAYLOAD='{"temperature": 21.5, "humidity": 45.0, "battery": 100}'
+PAYLOAD='{"id": 99,"tC": 21.4,"tF": 70.5,"ts": 1786840680.0}'
 
 echo "Payload a enviar: $PAYLOAD"
 
@@ -22,7 +22,7 @@ echo "Payload a enviar: $PAYLOAD"
 # -t "shelly/ht/..."      : El tópico MQTT donde se publica el mensaje.
 # -m "$PAYLOAD"           : El mensaje JSON que definimos arriba.
 
-docker exec -it iot_mosquitto_broker mosquitto_pub -h localhost -t "shelly/ht/room1/status" -m "$PAYLOAD"
+docker exec iot_mosquitto_broker mosquitto_pub -h localhost -t "shelly/ht/room1/status" -m "$PAYLOAD"
 
 echo "------------------------------------------"
 echo "✅ Mensaje publicado con éxito."
