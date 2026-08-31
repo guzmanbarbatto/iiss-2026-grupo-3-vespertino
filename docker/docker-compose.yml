@@ -1,31 +1,40 @@
-version: '3.8'
-
 services:
-  # 1. BROKER MQTT (Requerimiento del entregable)
+  # 1. BROKER MQTT
   mosquitto:
-    image: eclipse-mosquitto:2.0.15 # Usamos una versión específica estable de la industria
+    image: eclipse-mosquitto:2.0.15
     container_name: iot_mosquitto_broker
     ports:
-      # Exponemos el puerto 1883 hacia tu computadora para que puedas usar 
-      # los scripts (send-temp.sh) y clientes como MQTT Explorer desde tu PC local.
       - "1883:1883"
     volumes:
-      # Inyectamos el archivo de configuración para permitir conexiones sin contraseña 
-      # (necesario para Mosquitto 2.0+ en entornos de desarrollo local).
       - ./mosquitto.conf:/mosquitto/config/mosquitto.conf
-    restart: unless-stopped # Si se cae o reinicias Docker, se vuelve a levantar.
+    restart: unless-stopped
 
-  # 2. SUSCRIPTOR JAVA (Construido desde nuestro Dockerfile)
+  # 2. BASE DE DATOS POSTGRESQL
+  db:
+    image: postgres:15-alpine
+    container_name: iot_postgres_db
+    environment:
+      POSTGRES_USER: ecowarm_user
+      POSTGRES_PASSWORD: ecowarmpass
+      POSTGRES_DB: ecowarm
+    ports:
+      - "5432:5432"
+    volumes:
+      - ecowarm_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    restart: unless-stopped
+
+  # 3. SUSCRIPTOR JAVA
   java-subscriber:
     build:
-      # Le indicamos a Docker que salga de la carpeta /docker, entre a /src/subscriber 
-      # y use el Dockerfile que creamos allí para compilar el código.
       context: ../src/subscriber
       dockerfile: Dockerfile
     container_name: iot_java_subscriber
     depends_on:
-      # Esto asegura que Docker levante primero el broker antes de levantar el Java.
       - mosquitto
+      - db
     restart: on-failure
-    # on-failure es clave aquí: si el Java arranca milisegundos más rápido que el broker 
-    # y falla al conectar en el primer intento, Docker lo reiniciará automáticamente.
+
+# DECLARACIÓN DEL VOLUMEN (Faltaba esta parte o estaba mal indentada)
+volumes:
+  ecowarm_data:

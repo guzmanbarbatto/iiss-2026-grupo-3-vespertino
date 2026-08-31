@@ -16,12 +16,25 @@
     </properties>
 
     <dependencies>
-        <!-- Dependencia oficial de Eclipse Paho. 
-             Es la librería estándar de la industria para crear clientes MQTT en Java. -->
+        <!-- Eclipse Paho MQTT -->
         <dependency>
             <groupId>org.eclipse.paho</groupId>
             <artifactId>org.eclipse.paho.client.mqttv3</artifactId>
             <version>1.2.5</version>
+        </dependency>
+        
+        <!-- PostgreSQL JDBC Driver -->
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <version>42.7.2</version>
+        </dependency>
+        
+        <!-- Procesador JSON -->
+        <dependency>
+            <groupId>org.json</groupId>
+            <artifactId>json</artifactId>
+            <version>20240303</version>
         </dependency>
     </dependencies>
 
