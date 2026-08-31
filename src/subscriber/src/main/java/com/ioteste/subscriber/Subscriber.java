@@ -22,14 +22,14 @@ public class Subscriber {
             MqttConnectOptions connOpts = new MqttConnectOptions();
             connOpts.setCleanSession(true);
 
-            System.out.println("Conectando al broker MQTT en: " + brokerUrl);
+            Logger.info("Conectando al broker MQTT en: {}", brokerUrl);
             mqttClient.connect(connOpts);
-            System.out.println("¡Conectado exitosamente al broker!");
+            Logger.info("¡Conectado exitosamente al broker!");
 
             mqttClient.setCallback(new MqttCallback() {
                 @Override
                 public void connectionLost(Throwable cause) {
-                    System.out.println("Conexión perdida con el broker. Causa: " + cause.getMessage());
+                    Logger.error(cause, "Conexión perdida con el broker");
                 }
 
                 @Override
@@ -73,7 +73,7 @@ public class Subscriber {
             });
 
             mqttClient.subscribe("#");
-            System.out.println("Suscrito a todos los tópicos (#). Esperando mensajes...");
+            Logger.info("Suscrito a todos los tópicos (#). Esperando mensajes...");
 
         } catch (MqttException me) {
             me.printStackTrace();
