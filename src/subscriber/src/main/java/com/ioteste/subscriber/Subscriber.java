@@ -6,6 +6,7 @@ import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.Timestamp;
+// La importación de java.util.logging.Logger fue eliminada
 
 public class Subscriber {
     public static void main(String[] args) {
@@ -22,14 +23,16 @@ public class Subscriber {
             MqttConnectOptions connOpts = new MqttConnectOptions();
             connOpts.setCleanSession(true);
 
-            Logger.info("Conectando al broker MQTT en: {}", brokerUrl);
+            // Se reemplazó Logger.info por System.out.println
+            System.out.println("Conectando al broker MQTT en: " + brokerUrl);
             mqttClient.connect(connOpts);
-            Logger.info("¡Conectado exitosamente al broker!");
+            System.out.println("¡Conectado exitosamente al broker!");
 
             mqttClient.setCallback(new MqttCallback() {
                 @Override
                 public void connectionLost(Throwable cause) {
-                    Logger.error(cause, "Conexión perdida con el broker");
+                    // Se reemplazó Logger.error por System.err.println
+                    System.err.println("Conexión perdida con el broker: " + cause.getMessage());
                 }
 
                 @Override
@@ -73,7 +76,8 @@ public class Subscriber {
             });
 
             mqttClient.subscribe("#");
-            Logger.info("Suscrito a todos los tópicos (#). Esperando mensajes...");
+            // Se reemplazó Logger.info por System.out.println
+            System.out.println("Suscrito a todos los tópicos (#). Esperando mensajes...");
 
         } catch (MqttException me) {
             me.printStackTrace();
