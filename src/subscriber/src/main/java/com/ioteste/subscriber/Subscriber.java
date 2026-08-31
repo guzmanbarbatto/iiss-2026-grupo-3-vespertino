@@ -1,6 +1,7 @@
 package com.ioteste.subscriber;
 
 import org.eclipse.paho.client.mqttv3.*;
+import org.tinylog.Logger;
 import com.ioteste.subscriber.Domain.EventoTemperatura;
 import com.ioteste.subscriber.service.EventoTemperaturaDeserializer;
 import com.ioteste.subscriber.Domain.Habitacion;
@@ -36,16 +37,16 @@ public class Subscriber {
             // antiguos si nos desconectamos. Es un suscriptor en tiempo real.
             connOpts.setCleanSession(true);
 
-            System.out.println("Conectando al broker MQTT en: " + brokerUrl);
+            Logger.info("Conectando al broker MQTT en: {}", brokerUrl);
             mqttClient.connect(connOpts);
-            System.out.println("¡Conectado exitosamente al broker!");
+            Logger.info("¡Conectado exitosamente al broker!");
 
             // Definimos qué hacer cuando ocurren eventos asíncronos (callbacks)
             mqttClient.setCallback(new MqttCallback() {
 
                 @Override
                 public void connectionLost(Throwable cause) {
-                    System.out.println("Conexión perdida con el broker. Causa: " + cause.getMessage());
+                    Logger.error(cause, "Conexión perdida con el broker");
                 }
 
                 /*
@@ -54,40 +55,42 @@ public class Subscriber {
                  */
                 @Override
                 public void messageArrived(String topic, MqttMessage message) {
-                    System.out.println("==========================================");
-                    System.out.println("Tópico recibido : " + topic);
+                    Logger.info("Tópico recibido: {}", topic);
 
                     byte[] payload = message.getPayload();
 
-                    System.out.println("Payload recibido: " + new String(payload));
+                    Logger.info("Payload recibido: {}", new String(payload));
 
                     try {
                         EventoTemperatura evento = deserializer.deserializar(payload);
 
-                        System.out.println("ID habitación   : " + evento.getid());
-                        System.out.println("Temperatura °C   : " + evento.gettC());
-                        System.out.println("Temperatura °F   : " + evento.gettF());
-                        System.out.println("Timestamp        : " + evento.getts());
+                        Logger.info("ID habitación: {}", evento.getid());
+                        Logger.info("Temperatura °C: {}", evento.gettC());
+                        Logger.info("Temperatura °F: {}", evento.gettF());
+                        Logger.info("Timestamp: {}", evento.getts());
 
                         Habitacion habitacion = repository.buscarPorId(evento.getid());
 
                         if (habitacion != null) {
-                            System.out.println("Habitación encontrada:");
-                            System.out.println("Termostato       : " + habitacion.getTermostato());
-                            System.out.println("Switch           : " + habitacion.getSwitchId());
-                            System.out.println("Temperatura objetivo: "
-                                    + habitacion.getTemperaturaObjetivo());
+                            Logger.info(
+                                    "Habitación encontrada - ID: {}, Termostato: {}, Switch: {}, Temperatura objetivo: {}",
+                                    habitacion.getId(),
+                                    habitacion.getTermostato(),
+                                    habitacion.getSwitchId(),
+                                    habitacion.getTemperaturaObjetivo()
+                            );
                         } else {
-                            System.out.println("No existe una habitación con ID "
-                                    + evento.getid());
+                            Logger.warn(
+                                    "No existe una habitación con ID {}",
+                                    evento.getid()
+                            );
                         }
                     } catch(IOException e){
-                        System.out.println("Error al deserializar el mensaje.");
-                        System.out.println("El payload no corresponde a EventoTemperatura.");
-                        System.out.println("Detalle: " + e.getMessage());
+                        Logger.error(
+                                e,
+                                "Error al deserializar el mensaje. El payload no corresponde a EventoTemperatura"
+                        );
                     }
-
-                    System.out.println("==========================================");
                 }
 
                 @Override
@@ -103,13 +106,16 @@ public class Subscriber {
              * En iteraciones futuras se puede ajustar a "shelly/#" para escuchar solo dispositivos.
              */
             mqttClient.subscribe("#");
-            System.out.println("Suscrito a todos los tópicos (#). Esperando mensajes...");
+            Logger.info("Suscrito a todos los tópicos (#). Esperando mensajes...");
 
         } catch (MqttException me) {
             // Manejo de errores específicos del protocolo MQTT
-            System.out.println("Error MQTT - Razón: " + me.getReasonCode());
-            System.out.println("Mensaje: " + me.getMessage());
-            me.printStackTrace();
+            Logger.error(
+                    me,
+                    "Error MQTT - Razón: {} - Mensaje: {}",
+                    me.getReasonCode(),
+                    me.getMessage()
+            );
         }
     }
 }

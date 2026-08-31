@@ -13,7 +13,7 @@ echo "Enviando telemetría al tópico: shelly/ht/room1/status"
 echo "------------------------------------------"
 
 # Definimos el mensaje JSON con datos simulados
-PAYLOAD='{"id": 99,"tC": 21.4,"tF": 70.5,"ts": 1786840680.0}'
+PAYLOAD='{"id": 0,"tC": 21.4,"tF": 70.5,"ts": 1786840680.0}'
 
 echo "Payload a enviar: $PAYLOAD"
 
