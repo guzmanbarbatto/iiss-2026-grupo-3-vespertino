@@ -1,0 +1,22 @@
+name: CI Dockerized Pipeline
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build-and-verify:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout del repositorio
+      uses: actions/checkout@v3
+
+    - name: Otorgar permisos de ejecución al script
+      run: chmod +x ./scripts/build.sh
+
+    - name: Compilación Aislada (Multi-stage Docker)
+      # BuildKit compila ambos módulos (Generador y Suscriptor) dentro de 
+      # contenedores efímeros sin requerir Java ni Maven en el sistema host.
+      run: ./scripts/build.sh

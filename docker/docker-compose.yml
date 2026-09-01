@@ -1,40 +1,84 @@
+# Especificación semántica del plano de control para la orquestación de contenedores.
+version: '3.8'
+
 services:
-  # 1. BROKER MQTT
-  mosquitto:
-    image: eclipse-mosquitto:2.0.15
-    container_name: iot_mosquitto_broker
+  # Instanciación del nodo de enrutamiento central (Message Broker) bajo el protocolo MQTT.
+  mosquitto-broker:
+    image: eclipse-mosquitto:2.0
+    container_name: iot_mosquitto
     ports:
+      # Mapeo de puertos para la exposición del socket TCP en la interfaz del host.
       - "1883:1883"
     volumes:
+      # Montaje de volumen tipo bind para la inyección del archivo de configuración estático.
       - ./mosquitto.conf:/mosquitto/config/mosquitto.conf
-    restart: unless-stopped
+    networks:
+      # Acoplamiento del contenedor a la red definida por software (SDN).
+      - iot-network
 
-  # 2. BASE DE DATOS POSTGRESQL
-  db:
+  # Aprovisionamiento del Sistema Gestor de Base de Datos Relacional (RDBMS).
+  postgres-db:
     image: postgres:15-alpine
     container_name: iot_postgres_db
     environment:
+      # Inyección de credenciales de acceso mediante variables de entorno para evitar el hardcoding.
       POSTGRES_USER: ecowarm_user
       POSTGRES_PASSWORD: ecowarmpass
       POSTGRES_DB: ecowarm
     ports:
       - "5432:5432"
     volumes:
+      # Montaje de volumen persistente (Stateful) para garantizar la retención de datos tras la destrucción del contenedor.
       - ecowarm_data:/var/lib/postgresql/data
+      # Inyección del script DDL (Data Definition Language) para la inicialización idempotente del esquema.
       - ./init.sql:/docker-entrypoint-initdb.d/init.sql
-    restart: unless-stopped
+    networks:
+      - iot-network
+    healthcheck:
+      # Sonda de disponibilidad (Liveness Probe) para evaluar la conectividad del socket PostgreSQL.
+      test: ["CMD-SHELL", "pg_isready -U ecowarm_user -d ecowarm"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
-  # 3. SUSCRIPTOR JAVA
-  java-subscriber:
+  # Despliegue del cliente consumidor (Subscriber) encapsulado en su propia imagen estática.
+  event-subscriber:
     build:
       context: ../src/subscriber
       dockerfile: Dockerfile
-    container_name: iot_java_subscriber
+    container_name: iot_subscriber
+    environment:
+      # Resolución dinámica de dominios y credenciales hacia la capa de persistencia y mensajería (Service Discovery).
+      MQTT_BROKER_URL: tcp://mosquitto-broker:1883
+      DB_URL: jdbc:postgresql://postgres-db:5432/ecowarm
+      POSTGRES_USER: ecowarm_user
+      POSTGRES_PASSWORD: ecowarmpass
     depends_on:
-      - mosquitto
-      - db
-    restart: on-failure
+      # Implementación de barrera de sincronización basada en el estado de salud del nodo relacional (Deterministic Startup).
+      postgres-db:
+        condition: service_healthy
+    networks:
+      - iot-network
 
-# DECLARACIÓN DEL VOLUMEN (Faltaba esta parte o estaba mal indentada)
+  # Despliegue del cliente publicador asíncrono (Event Generator).
+  event-generator:
+    build:
+      context: ../src/generador
+      dockerfile: Dockerfile
+    container_name: iot_generator
+    environment:
+      MQTT_BROKER_URL: tcp://mosquitto-broker:1883
+    depends_on:
+      # Condicionamiento de arranque secuencial respecto al broker MQTT.
+      - mosquitto-broker
+    networks:
+      - iot-network
+
+networks:
+  # Declaración de la topología de red virtual en puente (Bridge) para el aislamiento de capa 2.
+  iot-network:
+    driver: bridge
+
 volumes:
+  # Declaración del volumen nombrado administrado por el demonio de Docker.
   ecowarm_data:
