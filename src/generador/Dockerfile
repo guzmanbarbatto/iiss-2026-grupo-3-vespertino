@@ -1,5 +1,5 @@
 # Etapa 1: Aprovisionamiento de dependencias y compilación (Build Stage)
-FROM maven:3.9-eclipse-temurin-17-alpine AS builder
+FROM maven:3.9-eclipse-temurin-25-alpine AS builder
 WORKDIR /app
 
 # Inyección del modelo de dependencias y el código fuente
@@ -10,7 +10,7 @@ COPY src ./src
 RUN mvn clean package -DskipTests
 
 # Etapa 2: Configuración del entorno de ejecución (Runtime Stage)
-FROM eclipse-temurin:17-jre-alpine
+FROM eclipse-temurin:25-jre-alpine
 WORKDIR /app
 
 # Extracción estricta del binario ensamblado con sus dependencias (Fat JAR)
