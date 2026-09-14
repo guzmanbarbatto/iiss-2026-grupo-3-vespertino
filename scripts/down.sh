@@ -15,7 +15,7 @@ if [ -d "docker" ]; then
 elif [ -d "../docker" ]; then
     cd ../docker
 else
-    echo "❌ Error: No se pudo encontrar el directorio 'docker'."
+    echo "Error: No se pudo encontrar el directorio 'docker'."
     exit 1
 fi
 
