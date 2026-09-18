@@ -168,22 +168,3 @@ public class HabitacionRepository {
         }
     }
 }
-        /*String sql = "UPDATE habitacion SET nombre = ?, termostato_id = ?, switch_id = ?, temperatura_objetivo = ? WHERE id = ?";
-
-        try (Connection conexion = DriverManager.getConnection(url, usuario, contrasenia);
-             PreparedStatement statement = conexion.prepareStatement(sql)){
-
-            statement.setString(1,habitacion.getNombre());
-            statement.setString(2,habitacion.getIdTermostato());
-            statement.setString(3,habitacion.getIdSwitch());
-            statement.setDouble(4,habitacion.getTemperaturaEsperada());
-            statement.setInt(5,habitacion.getId());
-
-            int habitacionActualizada = statement.executeUpdate();
-
-            if(habitacionActualizada == 0){
-                throw new RuntimeException("No existe una habitacion con el id "+ habitacion.getId());
-            }
-        }catch(SQLException e){
-            throw new RuntimeException("Error al actualizar habitacion", e);
-        }*/
