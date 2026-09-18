@@ -5,7 +5,8 @@ WORKDIR /app
 # Inyección del modelo de dependencias y el código fuente
 COPY pom.xml .
 COPY generador/pom.xml generador/pom.xml
-COPY generador/src generador/src
+COPY subscriber/pom.xml subscriber/pom.xml
+COPY api/pom.xml api/pom.xml
 
 # Compilación aislada y empaquetado del artefacto binario (Fat JAR)
 RUN mvn -pl generador -am clean package -DskipTests

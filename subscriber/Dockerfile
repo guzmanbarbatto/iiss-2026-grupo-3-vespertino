@@ -7,8 +7,9 @@ WORKDIR /app
 
 # Copiamos primero el pom.xml y el código fuente al contenedor
 COPY pom.xml .
+COPY generador/pom.xml generador/pom.xml
 COPY subscriber/pom.xml subscriber/pom.xml
-COPY subscriber/src subscriber/src
+COPY api/pom.xml api/pom.xml
 
 # Ejecutamos Maven para compilar el proyecto y generar el archivo .jar ejecutable.
 # Usamos -DskipTests para acelerar el proceso omitiendo los tests (útil en esta etapa 1).

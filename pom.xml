@@ -17,6 +17,7 @@
     <modules>
         <module>generador</module>
         <module>subscriber</module>
+        <module>api</module>
     </modules>
 
     <properties>
