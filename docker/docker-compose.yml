@@ -44,8 +44,8 @@ services:
   # Despliegue del cliente consumidor (Subscriber) encapsulado en su propia imagen estática.
   event-subscriber:
     build:
-      context: ../src/subscriber
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: subscriber/Dockerfile
     container_name: iot_subscriber
     environment:
       # Resolución dinámica de dominios y credenciales hacia la capa de persistencia y mensajería (Service Discovery).
@@ -63,8 +63,8 @@ services:
   # Despliegue del cliente publicador asíncrono (Event Generator).
   event-generator:
     build:
-      context: ../src/generador
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: generador/Dockerfile
     container_name: iot_generator
     environment:
       MQTT_BROKER_URL: tcp://mosquitto-broker:1883
