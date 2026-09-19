@@ -104,7 +104,7 @@ public class HabitacionRepository {
         return null;
     }
 
-    public void eliminarHabitacion(int id){
+    public boolean eliminarHabitacion(int id){
         String sql = "DELETE FROM habitacion WHERE id = ?";
 
         try (Connection conexion = DriverManager.getConnection(url, usuario, contrasenia);
@@ -113,31 +113,31 @@ public class HabitacionRepository {
             statement.setInt(1,id);
             int habitacionEliminada = statement.executeUpdate();
 
-            if(habitacionEliminada == 0){
-                throw new RuntimeException("No existe una habitacion con el id "+id);
-            }
+            return habitacionEliminada > 0;
 
         }catch (SQLException e){
             throw new RuntimeException("Error al eliminar habitacion", e);
         }
     }
 
-    public void actualizarHabitacion(Habitacion habitacion){
+    public int actualizarHabitacion(Habitacion habitacion){
         List<String> campos = new ArrayList<>();
 
         if (habitacion.getNombre() != null) {
             campos.add("nombre = ?");
-        }if (habitacion.getTemperaturaEsperada() != null) {
+        }
+        if (habitacion.getTemperaturaEsperada() != null) {
             campos.add("temperatura_objetivo = ?");
-        }if (habitacion.getIdTermostato() != null) {
+        }
+        if (habitacion.getIdTermostato() != null) {
             campos.add("termostato_id = ?");
-        }if (habitacion.getIdSwitch() != null) {
+        }
+        if (habitacion.getIdSwitch() != null) {
             campos.add("switch_id = ?");
         }
 
         if(campos.isEmpty()){
-            //codigo de error correspondiente 400, no hay body
-            return;
+            return 400;
         }
 
         String sql = "UPDATE habitacion SET " + String.join(", ", campos) + " WHERE id = ?";
@@ -161,10 +161,11 @@ public class HabitacionRepository {
             int habitacionActualizada = statement.executeUpdate();
 
             if(habitacionActualizada == 0){
-                throw new RuntimeException("No existe una habitacion con el id "+ habitacion.getId());
+                return 404;
             }
         }catch(SQLException e){
             throw new RuntimeException("Error al actualizar habitacion", e);
         }
+        return 200;
     }
 }
