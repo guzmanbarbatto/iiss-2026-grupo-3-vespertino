@@ -4,6 +4,9 @@ import com.ioteste.api.Domain.Habitacion;
 import com.ioteste.api.Repository.HabitacionRepository;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.http.ResponseEntity;
+import com.ioteste.api.Domain.ValidacionResponse;
+import java.util.HashSet;
+import java.util.Set;
 
 import java.util.List;
 
@@ -75,4 +78,27 @@ public class HabitacionController {
         }
         return ResponseEntity.notFound().build();
     }
+
+    @PostMapping("/validaciones")
+    public ResponseEntity<ValidacionResponse> validarConsistencia() {
+       List<Habitacion> habitaciones = repository.listar();
+       Set<String> termostatos = new HashSet<>();
+       Set<String> switches = new HashSet<>();
+
+       for (Habitacion hab : habitaciones) {
+           // Validar faltantes
+           if (hab.getIdTermostato() == null || hab.getIdTermostato().trim().isEmpty() ||
+               hab.getIdSwitch() == null || hab.getIdSwitch().trim().isEmpty()) {
+               return ResponseEntity.ok(new ValidacionResponse(false, 
+                   "Faltan identificadores en la habitación ID: " + hab.getId()));
+           }
+        
+           // Validar duplicados
+           if (!termostatos.add(hab.getIdTermostato()) || !switches.add(hab.getIdSwitch())) {
+               return ResponseEntity.ok(new ValidacionResponse(false, 
+                   "Se detectaron identificadores de termostato o switch duplicados."));
+           }
+       }
+       return ResponseEntity.ok(new ValidacionResponse(true, "El conjunto de habitaciones es consistente."));
+}
 }
