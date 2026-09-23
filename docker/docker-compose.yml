@@ -74,6 +74,32 @@ services:
     networks:
       - iot-network
 
+
+  # Iteración 3: Despliegue de la API REST, Controlador y Stub del Switch.
+  rest-api:
+    build:
+      context: ../src/api
+      dockerfile: Dockerfile
+    container_name: iot_rest_api
+    environment:
+      # Inyección de dependencias para comunicación con Broker, DB y token de autenticación Bearer.
+      MQTT_BROKER_URL: tcp://mosquitto-broker:1883
+      DB_URL: jdbc:postgresql://postgres-db:5432/ecowarm
+      POSTGRES_USER: ecowarm_user
+      POSTGRES_PASSWORD: ecowarmpass
+      AUTH_TOKEN: secret-token-123
+    ports:
+      # Exposición del servicio HTTP REST en la interfaz del host.
+      - "8080:8080"
+    depends_on:
+      # Garantiza que la BD y el broker estén operativos antes de levantar el backend HTTP.
+      postgres-db:
+        condition: service_healthy
+      mosquitto-broker:
+        condition: service_started
+    networks:
+      - iot-network
+
 networks:
   # Declaración de la topología de red virtual en puente (Bridge) para el aislamiento de capa 2.
   iot-network:

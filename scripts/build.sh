@@ -4,6 +4,7 @@
 # mitigando colisiones de dependencias con el sistema operativo host.
 
 echo "Inicializando el motor de construcción (BuildKit) para la resolución asíncrona de dependencias Maven..."
+echo "[Iteración 3] Procesando módulos: Generador, Suscriptor y la nueva REST API/Controlador..."
 
 # Invocación de la directiva de empaquetado para procesar los manifiestos Dockerfiles (Multi-stage).
 # Nota arquitectónica: Esta ejecución es puramente estática. No instancia sockets de red ni procesos en runtime.

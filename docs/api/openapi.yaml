@@ -1,0 +1,214 @@
+openapi: 3.0.3
+info:
+  title: EcoWarm API
+  description: API REST para la gestión de habitaciones, control del termostato y tareas del sistema IoTEste.
+  version: 1.0.0
+servers:
+  - url: http://localhost:8080/api
+    description: Servidor Local (Spring Boot)
+
+# Delcaración de esquema de seguridad y modelos de datos
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Ingrese el token Bearer para acceder a la API.
+
+  schemas:
+    Room:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 1
+        name:
+          type: string
+          example: "Dormitorio Principal"
+        targetTemperature:
+          type: number
+          format: float
+          example: 22.5
+      required:
+        - name
+        - targetTemperature
+
+    RoomUpdate:
+      type: object
+      properties:
+        name:
+          type: string
+          example: "Dormitorio Principal"
+        targetTemperature:
+          type: number
+          format: float
+          example: 24.0
+
+    SwitchCommand:
+      type: object
+      properties:
+        action:
+          type: string
+          enum: [ON, OFF]
+          example: "ON"
+      required:
+        - action
+
+    ConsistencyReport:
+      type: object
+      properties:
+        isConsistent:
+          type: boolean
+          example: false
+        missingIds:
+          type: array
+          items:
+            type: integer
+          example: [3, 4]
+        duplicatedIds:
+          type: array
+          items:
+            type: integer
+          example: [2]
+
+# Aplica la seguridad Bearer a TODAS las rutas por defecto
+security:
+  - bearerAuth: []
+
+paths:
+  /rooms:
+    get:
+      summary: Obtener todas las habitaciones
+      responses:
+        '200':
+          description: Lista de habitaciones obtenida con éxito
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Room'
+    post:
+      summary: Crear una nueva habitación
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Room'
+      responses:
+        '201':
+          description: Habitación creada exitosamente
+
+  /rooms/{id}:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema:
+          type: integer
+        description: ID de la habitación
+    get:
+      summary: Obtener una habitación específica
+      responses:
+        '200':
+          description: Detalle de la habitación
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Room'
+        '404':
+          description: Habitación no encontrada
+    put:
+      summary: Reemplazar una habitación por completo
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Room'
+      responses:
+        '200':
+          description: Habitación actualizada
+        '404':
+          description: Habitación no encontrada
+    patch:
+      summary: Modificación parcial de una habitación
+      description: Permite modificar solo algunos atributos (ej. solo la targetTemperature).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RoomUpdate'
+      responses:
+        '200':
+          description: Habitación actualizada parcialmente
+        '404':
+          description: Habitación no encontrada
+    delete:
+      summary: Eliminar una habitación
+      responses:
+        '204':
+          description: Habitación eliminada correctamente
+        '404':
+          description: Habitación no encontrada
+
+  # ---------------------------------------------------------
+  # INGSOF-25: Comandos de Switch (HU-4)
+  # ---------------------------------------------------------
+  /rooms/{id}/switch:
+    post:
+      summary: Accionar el switch de una habitación (ON/OFF)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+          description: ID de la habitación cuyo switch se accionará
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SwitchCommand'
+      responses:
+        '200':
+          description: Comando enviado al switch exitosamente
+        '400':
+          description: Comando inválido
+        '404':
+          description: Habitación no encontrada
+
+ # Comandos del controlador
+
+  /controller/start:
+    post:
+      summary: Iniciar el Controlador del termostato
+      responses:
+        '200':
+          description: Controlador iniciado exitosamente
+
+  /controller/stop:
+    post:
+      summary: Detener el Controlador del termostato
+      responses:
+        '200':
+          description: Controlador detenido exitosamente
+
+  #Tarea de validación de consistencia
+
+  /tasks/validate-consistency:
+    post:
+      summary: Validar la consistencia de los identificadores de las habitaciones
+      description: Verifica que no existan IDs faltantes o duplicados en el conjunto de habitaciones.
+      responses:
+        '200':
+          description: Resultado de la validación
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsistencyReport'
