@@ -1,0 +1,209 @@
+openapi: 3.0.3
+info:
+  title: API REST EcoWarm
+  description: API para la gestión de habitaciones y comandos de control del sistema domótico EcoWarm.
+  version: 1.0.0
+servers:
+  - url: http://localhost:8080/api/v1
+    description: Entorno local (Docker)
+
+# Esquema de autenticación transversal aplicado a todas las rutas
+security:
+  - BearerAuth: []
+
+paths:
+  /habitaciones:
+    get:
+      summary: Listado de habitaciones
+      description: Retorna todas las habitaciones registradas en el sitio[cite: 1].
+      responses:
+        '200':
+          description: Lista devuelta exitosamente
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Habitacion'
+    post:
+      summary: Alta de una nueva habitación
+      description: Crea un nuevo recurso de habitación[cite: 1].
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HabitacionInput'
+      responses:
+        '201':
+          description: Habitación creada
+
+  /habitaciones/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+    get:
+      summary: Consulta de una habitación por ID
+      description: Devuelve los datos de una habitación específica[cite: 1].
+      responses:
+        '200':
+          description: Datos de la habitación
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Habitacion'
+        '404':
+          description: Habitación no encontrada
+    patch:
+      summary: Modificación parcial de la habitación
+      description: Actualiza uno o más campos de la habitación sin sobreescribir el resto[cite: 1].
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HabitacionPatch'
+      responses:
+        '200':
+          description: Habitación actualizada
+    delete:
+      summary: Borrado de la habitación
+      description: Elimina físicamente la habitación del sistema[cite: 1].
+      responses:
+        '204':
+          description: Habitación eliminada correctamente
+
+  /switches/{idSwitch}/acciones:
+    post:
+      summary: Comando para accionar un switch (ON/OFF)
+      description: Tarea operativa que dispara el encendido o apagado contra el stub[cite: 1].
+      parameters:
+        - name: idSwitch
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ComandoSwitch'
+      responses:
+        '200':
+          description: Acción enviada al stub del switch exitosamente
+
+  /controlador/acciones:
+    post:
+      summary: Comando para iniciar o parar el Controlador
+      description: Tarea operativa para cambiar el estado del motor de evaluación del termostato[cite: 1].
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ComandoControlador'
+      responses:
+        '200':
+          description: Estado del controlador actualizado
+
+  /habitaciones/validaciones:
+    post:
+      summary: Validar la consistencia del conjunto de habitaciones
+      description: Tarea operativa que verifica que no existan identificadores de termostato o switch faltantes ni duplicados[cite: 1].
+      responses:
+        '200':
+          description: Consistencia validada correctamente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidacionResponse'
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      description: Ingrese el token Bearer para consumir el API[cite: 1].
+
+  schemas:
+    Habitacion:
+      type: object
+      properties:
+        id:
+          type: integer
+        nombre:
+          type: string
+        temperaturaEsperada:
+          type: number
+          format: float
+        idTermostato:
+          type: string
+        idSwitch:
+          type: string
+      required:
+        - id
+        - nombre
+        - temperaturaEsperada
+        - idTermostato
+        - idSwitch
+
+    HabitacionInput:
+      type: object
+      properties:
+        nombre:
+          type: string
+        temperaturaEsperada:
+          type: number
+          format: float
+        idTermostato:
+          type: string
+        idSwitch:
+          type: string
+      required:
+        - nombre
+        - temperaturaEsperada
+        - idTermostato
+        - idSwitch
+
+    HabitacionPatch:
+      type: object
+      properties:
+        nombre:
+          type: string
+        temperaturaEsperada:
+          type: number
+          format: float
+        idTermostato:
+          type: string
+        idSwitch:
+          type: string
+
+    ComandoSwitch:
+      type: object
+      properties:
+        accion:
+          type: string
+          enum: [ON, OFF]
+      required:
+        - accion
+
+    ComandoControlador:
+      type: object
+      properties:
+        accion:
+          type: string
+          enum: [INICIAR, PARAR]
+      required:
+        - accion
+
+    ValidacionResponse:
+      type: object
+      properties:
+        consistente:
+          type: boolean
+        mensaje:
+          type: string
