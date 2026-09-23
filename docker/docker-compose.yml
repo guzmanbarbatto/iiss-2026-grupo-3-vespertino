@@ -71,25 +71,29 @@ services:
     networks:
       - iot-network
 
-  # Despliegue de la API REST y el Termostato Asíncrono (Sprint 3)
-  api:
+
+  # Iteración 3: Despliegue de la API REST, Controlador y Stub del Switch.
+  rest-api:
     build:
-      context: ..
-      dockerfile: api/Dockerfile
-    image: ecowarm-api:latest
-    container_name: ecowarm_api
+      context: ../src/api
+      dockerfile: Dockerfile
+    container_name: iot_rest_api
+    environment:
+      # Inyección de dependencias para comunicación con Broker, DB y token de autenticación Bearer.
+      MQTT_BROKER_URL: tcp://mosquitto-broker:1883
+      DB_URL: jdbc:postgresql://postgres-db:5432/ecowarm
+      POSTGRES_USER: ecowarm_user
+      POSTGRES_PASSWORD: ecowarmpass
+      AUTH_TOKEN: secret-token-123
     ports:
+      # Exposición del servicio HTTP REST en la interfaz del host.
       - "8080:8080"
     depends_on:
+      # Garantiza que la BD y el broker estén operativos antes de levantar el backend HTTP.
       postgres-db:
         condition: service_healthy
       mosquitto-broker:
         condition: service_started
-    environment:
-      - SPRING_DATASOURCE_URL=jdbc:postgresql://postgres-db:5432/ecowarm
-      - SPRING_DATASOURCE_USERNAME=ecowarm_user
-      - SPRING_DATASOURCE_PASSWORD=ecowarmpass
-      - MQTT_BROKER_URL=tcp://mosquitto-broker:1883
     networks:
       - iot-network
 

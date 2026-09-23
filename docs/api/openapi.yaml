@@ -1,209 +1,214 @@
 openapi: 3.0.3
 info:
-  title: API REST EcoWarm
-  description: API para la gestión de habitaciones y comandos de control del sistema domótico EcoWarm.
+  title: EcoWarm API
+  description: API REST para la gestión de habitaciones, control del termostato y tareas del sistema IoTEste.
   version: 1.0.0
 servers:
-  - url: http://localhost:8080/api/v1
-    description: Entorno local (Docker)
+  - url: http://localhost:8080/api
+    description: Servidor Local (Spring Boot)
 
-# Esquema de autenticación transversal aplicado a todas las rutas
+# Delcaración de esquema de seguridad y modelos de datos
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Ingrese el token Bearer para acceder a la API.
+
+  schemas:
+    Room:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 1
+        name:
+          type: string
+          example: "Dormitorio Principal"
+        targetTemperature:
+          type: number
+          format: float
+          example: 22.5
+      required:
+        - name
+        - targetTemperature
+
+    RoomUpdate:
+      type: object
+      properties:
+        name:
+          type: string
+          example: "Dormitorio Principal"
+        targetTemperature:
+          type: number
+          format: float
+          example: 24.0
+
+    SwitchCommand:
+      type: object
+      properties:
+        action:
+          type: string
+          enum: [ON, OFF]
+          example: "ON"
+      required:
+        - action
+
+    ConsistencyReport:
+      type: object
+      properties:
+        isConsistent:
+          type: boolean
+          example: false
+        missingIds:
+          type: array
+          items:
+            type: integer
+          example: [3, 4]
+        duplicatedIds:
+          type: array
+          items:
+            type: integer
+          example: [2]
+
+# Aplica la seguridad Bearer a TODAS las rutas por defecto
 security:
-  - BearerAuth: []
+  - bearerAuth: []
 
 paths:
-  /habitaciones:
+  /rooms:
     get:
-      summary: Listado de habitaciones
-      description: Retorna todas las habitaciones registradas en el sitio[cite: 1].
+      summary: Obtener todas las habitaciones
       responses:
         '200':
-          description: Lista devuelta exitosamente
+          description: Lista de habitaciones obtenida con éxito
           content:
             application/json:
               schema:
                 type: array
                 items:
-                  $ref: '#/components/schemas/Habitacion'
+                  $ref: '#/components/schemas/Room'
     post:
-      summary: Alta de una nueva habitación
-      description: Crea un nuevo recurso de habitación[cite: 1].
+      summary: Crear una nueva habitación
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/HabitacionInput'
+              $ref: '#/components/schemas/Room'
       responses:
         '201':
-          description: Habitación creada
+          description: Habitación creada exitosamente
 
-  /habitaciones/{id}:
+  /rooms/{id}:
     parameters:
-      - name: id
-        in: path
+      - in: path
+        name: id
         required: true
         schema:
           type: integer
+        description: ID de la habitación
     get:
-      summary: Consulta de una habitación por ID
-      description: Devuelve los datos de una habitación específica[cite: 1].
+      summary: Obtener una habitación específica
       responses:
         '200':
-          description: Datos de la habitación
+          description: Detalle de la habitación
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Habitacion'
+                $ref: '#/components/schemas/Room'
         '404':
           description: Habitación no encontrada
-    patch:
-      summary: Modificación parcial de la habitación
-      description: Actualiza uno o más campos de la habitación sin sobreescribir el resto[cite: 1].
+    put:
+      summary: Reemplazar una habitación por completo
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/HabitacionPatch'
+              $ref: '#/components/schemas/Room'
       responses:
         '200':
           description: Habitación actualizada
+        '404':
+          description: Habitación no encontrada
+    patch:
+      summary: Modificación parcial de una habitación
+      description: Permite modificar solo algunos atributos (ej. solo la targetTemperature).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RoomUpdate'
+      responses:
+        '200':
+          description: Habitación actualizada parcialmente
+        '404':
+          description: Habitación no encontrada
     delete:
-      summary: Borrado de la habitación
-      description: Elimina físicamente la habitación del sistema[cite: 1].
+      summary: Eliminar una habitación
       responses:
         '204':
           description: Habitación eliminada correctamente
+        '404':
+          description: Habitación no encontrada
 
-  /switches/{idSwitch}/acciones:
+  # ---------------------------------------------------------
+  # INGSOF-25: Comandos de Switch (HU-4)
+  # ---------------------------------------------------------
+  /rooms/{id}/switch:
     post:
-      summary: Comando para accionar un switch (ON/OFF)
-      description: Tarea operativa que dispara el encendido o apagado contra el stub[cite: 1].
+      summary: Accionar el switch de una habitación (ON/OFF)
       parameters:
-        - name: idSwitch
-          in: path
+        - in: path
+          name: id
           required: true
           schema:
-            type: string
+            type: integer
+          description: ID de la habitación cuyo switch se accionará
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/ComandoSwitch'
+              $ref: '#/components/schemas/SwitchCommand'
       responses:
         '200':
-          description: Acción enviada al stub del switch exitosamente
+          description: Comando enviado al switch exitosamente
+        '400':
+          description: Comando inválido
+        '404':
+          description: Habitación no encontrada
 
-  /controlador/acciones:
-    post:
-      summary: Comando para iniciar o parar el Controlador
-      description: Tarea operativa para cambiar el estado del motor de evaluación del termostato[cite: 1].
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/ComandoControlador'
-      responses:
-        '200':
-          description: Estado del controlador actualizado
+ # Comandos del controlador
 
-  /habitaciones/validaciones:
+  /controller/start:
     post:
-      summary: Validar la consistencia del conjunto de habitaciones
-      description: Tarea operativa que verifica que no existan identificadores de termostato o switch faltantes ni duplicados[cite: 1].
+      summary: Iniciar el Controlador del termostato
       responses:
         '200':
-          description: Consistencia validada correctamente
+          description: Controlador iniciado exitosamente
+
+  /controller/stop:
+    post:
+      summary: Detener el Controlador del termostato
+      responses:
+        '200':
+          description: Controlador detenido exitosamente
+
+  #Tarea de validación de consistencia
+
+  /tasks/validate-consistency:
+    post:
+      summary: Validar la consistencia de los identificadores de las habitaciones
+      description: Verifica que no existan IDs faltantes o duplicados en el conjunto de habitaciones.
+      responses:
+        '200':
+          description: Resultado de la validación
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ValidacionResponse'
-
-components:
-  securitySchemes:
-    BearerAuth:
-      type: http
-      scheme: bearer
-      description: Ingrese el token Bearer para consumir el API[cite: 1].
-
-  schemas:
-    Habitacion:
-      type: object
-      properties:
-        id:
-          type: integer
-        nombre:
-          type: string
-        temperaturaEsperada:
-          type: number
-          format: float
-        idTermostato:
-          type: string
-        idSwitch:
-          type: string
-      required:
-        - id
-        - nombre
-        - temperaturaEsperada
-        - idTermostato
-        - idSwitch
-
-    HabitacionInput:
-      type: object
-      properties:
-        nombre:
-          type: string
-        temperaturaEsperada:
-          type: number
-          format: float
-        idTermostato:
-          type: string
-        idSwitch:
-          type: string
-      required:
-        - nombre
-        - temperaturaEsperada
-        - idTermostato
-        - idSwitch
-
-    HabitacionPatch:
-      type: object
-      properties:
-        nombre:
-          type: string
-        temperaturaEsperada:
-          type: number
-          format: float
-        idTermostato:
-          type: string
-        idSwitch:
-          type: string
-
-    ComandoSwitch:
-      type: object
-      properties:
-        accion:
-          type: string
-          enum: [ON, OFF]
-      required:
-        - accion
-
-    ComandoControlador:
-      type: object
-      properties:
-        accion:
-          type: string
-          enum: [INICIAR, PARAR]
-      required:
-        - accion
-
-    ValidacionResponse:
-      type: object
-      properties:
-        consistente:
-          type: boolean
-        mensaje:
-          type: string
+                $ref: '#/components/schemas/ConsistencyReport'

@@ -1,6 +1,7 @@
 #!/bin/bash
 
-echo "Construyendo las imágenes de los contenedores..."
+echo "Inicializando el motor de construcción (BuildKit) para la resolución asíncrona de dependencias Maven..."
+echo "[Iteración 3] Procesando módulos: Generador, Suscriptor y la nueva REST API/Controlador..."
 
 # Construcción de los servicios definidos en el compose (Generador, Subscriber)
 docker compose -f docker/docker-compose.yml build
