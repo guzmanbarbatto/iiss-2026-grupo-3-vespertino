@@ -12,7 +12,6 @@ import org.springframework.web.client.RestTemplate;
 
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
-import java.util.Optional;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -67,16 +66,15 @@ public class TermostatoService {
         }
     }
 
-    private void procesarLectura(String payload) {
+private void procesarLectura(String payload) {
         try {
             JSONObject json = new JSONObject(payload);
             int idHabitacion = json.getInt("id");
             double temperaturaMedida = json.getDouble("tC");
 
-            Optional<Habitacion> habitacionOpt = habitacionRepository.findById(idHabitacion);
+            Habitacion hab = habitacionRepository.buscarPorId(idHabitacion);
             
-            if (habitacionOpt.isPresent()) {
-                Habitacion hab = habitacionOpt.get();
+            if (hab != null) {
                 double tempEsperada = hab.getTemperaturaEsperada(); 
 
                 String orden = null;
@@ -89,6 +87,8 @@ public class TermostatoService {
                 if (orden != null) {
                     ejecutarAccion(hab.getIdSwitch(), orden);
                 }
+            } else {
+                LOGGER.warning("Telemetría ignorada: No existe la habitación con ID " + idHabitacion);
             }
 
         } catch (Exception e) {

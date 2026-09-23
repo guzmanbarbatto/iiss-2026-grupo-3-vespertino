@@ -1,16 +1,18 @@
 # Etapa 1: Compilación (Build Stage)
-FROM maven:3.9-eclipse-temurin-21 AS builder
+FROM maven:3.9-eclipse-temurin-25 AS builder
 WORKDIR /app
-# Copiamos el pom.xml y el código fuente
-COPY pom.xml .
-COPY src ./src
-# Compilamos el proyecto empaquetando el .jar sin depender del host
-RUN mvn clean package -DskipTests
+
+# Copiamos todo el repositorio para que Maven detecte la estructura completa del padre y sus hijos
+COPY . .
+
+# Compilamos exclusivamente el módulo 'api' y sus dependencias (-am)
+RUN mvn clean package -pl api -am
 
 # Etapa 2: Ejecución (Run Stage)
-FROM eclipse-temurin:21-jre-alpine
+FROM eclipse-temurin:25-jre-alpine
 WORKDIR /app
-# Traemos solo el ejecutable de la etapa anterior para mantener la imagen liviana
-COPY --from=builder /app/target/*.jar app.jar
+
+# Extraemos solo el ejecutable de la API para mantener la imagen limpia y liviana
+COPY --from=builder /app/api/target/*.jar app.jar
 EXPOSE 8080
 ENTRYPOINT ["java", "-jar", "app.jar"]

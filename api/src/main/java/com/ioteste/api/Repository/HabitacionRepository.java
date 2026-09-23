@@ -1,16 +1,21 @@
 package com.ioteste.api.Repository;
 
 import com.ioteste.api.Domain.Habitacion;
+import org.springframework.stereotype.Repository;
 
 import java.sql.*;
 import java.util.ArrayList;
 import java.util.List;
 
+@Repository
 public class HabitacionRepository {
 
-    private final String url = "jdbc:postgresql://localhost:5432/ecowarm";
-    private final String usuario = "ecowarm_user";
-    private final String contrasenia = "ecowarmpass";
+private final String url = System.getenv("SPRING_DATASOURCE_URL") != null ? 
+                               System.getenv("SPRING_DATASOURCE_URL") : "jdbc:postgresql://localhost:5432/ecowarm";
+    private final String usuario = System.getenv("SPRING_DATASOURCE_USERNAME") != null ? 
+                                   System.getenv("SPRING_DATASOURCE_USERNAME") : "ecowarm_user";
+    private final String contrasenia = System.getenv("SPRING_DATASOURCE_PASSWORD") != null ? 
+                                       System.getenv("SPRING_DATASOURCE_PASSWORD") : "ecowarmpass";
 
     public List<Habitacion> listar() {
         List<Habitacion> habitaciones = new ArrayList<>();

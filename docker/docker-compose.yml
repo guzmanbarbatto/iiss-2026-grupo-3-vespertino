@@ -1,6 +1,3 @@
-# Especificación semántica del plano de control para la orquestación de contenedores.
-version: '3.8'
-
 services:
   # Instanciación del nodo de enrutamiento central (Message Broker) bajo el protocolo MQTT.
   mosquitto-broker:
@@ -74,6 +71,28 @@ services:
     networks:
       - iot-network
 
+  # Despliegue de la API REST y el Termostato Asíncrono (Sprint 3)
+  api:
+    build:
+      context: ..
+      dockerfile: api/Dockerfile
+    image: ecowarm-api:latest
+    container_name: ecowarm_api
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres-db:
+        condition: service_healthy
+      mosquitto-broker:
+        condition: service_started
+    environment:
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://postgres-db:5432/ecowarm
+      - SPRING_DATASOURCE_USERNAME=ecowarm_user
+      - SPRING_DATASOURCE_PASSWORD=ecowarmpass
+      - MQTT_BROKER_URL=tcp://mosquitto-broker:1883
+    networks:
+      - iot-network
+
 networks:
   # Declaración de la topología de red virtual en puente (Bridge) para el aislamiento de capa 2.
   iot-network:
@@ -82,22 +101,3 @@ networks:
 volumes:
   # Declaración del volumen nombrado administrado por el demonio de Docker.
   ecowarm_data:
-
-  api:
-    build:
-      context: ../api
-      dockerfile: Dockerfile
-    image: ecowarm-api:latest
-    container_name: ecowarm_api
-    ports:
-      - "8080:8080"
-    depends_on:
-      - postgres
-      - mosquitto
-    environment:
-      - SPRING_DATASOURCE_URL=jdbc:postgresql://postgres:5432/ecowarm
-      - SPRING_DATASOURCE_USERNAME=ecowarm_user
-      - SPRING_DATASOURCE_PASSWORD=ecowarmpass
-      - MQTT_BROKER_URL=tcp://mosquitto:1883
-    networks:
-      - iot-network

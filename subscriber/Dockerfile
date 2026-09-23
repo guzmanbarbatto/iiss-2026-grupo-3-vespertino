@@ -1,29 +1,18 @@
-# ==========================================
-# ETAPA 1: Construcción (Build)
-# ==========================================
-# Usamos una imagen que contiene Maven y el JDK completo para poder compilar.
-FROM maven:3.9-eclipse-temurin-25 AS build
+# Etapa 1: Compilación (Build Stage)
+FROM maven:3.9-eclipse-temurin-25 AS builder
 WORKDIR /app
 
-# Copiamos primero el pom.xml y el código fuente al contenedor
-COPY pom.xml .
-COPY generador/pom.xml generador/pom.xml
-COPY subscriber/pom.xml subscriber/pom.xml
-COPY api/pom.xml api/pom.xml
+# Copiamos todo el repositorio raíz para que Maven reconozca el POM padre y sus hijos
+COPY . .
 
-# Ejecutamos Maven para compilar el proyecto y generar el archivo .jar ejecutable.
-# Usamos -DskipTests para acelerar el proceso omitiendo los tests (útil en esta etapa 1).
-RUN mvn -pl subscriber -am clean package -DskipTests
+# Compilamos exclusivamente el módulo 'subscriber' y sus dependencias (-am)
+RUN mvn clean package -pl subscriber -am
 
-# ==========================================
-# ETAPA 2: Ejecución (Run)
-# ==========================================
-# Para la imagen final, usamos solo el JRE (Java Runtime Environment), que es mucho más ligero.
-FROM eclipse-temurin:25-jre
+# Etapa 2: Ejecución (Run Stage)
+FROM eclipse-temurin:25-jre-alpine
 WORKDIR /app
 
-# Copiamos el archivo .jar generado en la ETAPA 1 (build) hacia esta imagen final limpia.
-COPY --from=build /app/subscriber/target/*-jar-with-dependencies.jar app.jar
-
-# Comando principal que se ejecuta al levantar el contenedor por el docker-compose.
-CMD ["java", "-jar", "app.jar"]
+# Extraemos el JAR compilado desde la ruta correcta
+COPY --from=builder /app/subscriber/target/*-jar-with-dependencies.jar app.jar
+EXPOSE 8080
+ENTRYPOINT ["java", "-jar", "app.jar"]
