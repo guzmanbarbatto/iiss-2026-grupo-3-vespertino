@@ -8,5 +8,6 @@ echo "Inicializando el motor de construcción (BuildKit) para la resolución as�
 # Invocación de la directiva de empaquetado para procesar los manifiestos Dockerfiles (Multi-stage).
 # Nota arquitectónica: Esta ejecución es puramente estática. No instancia sockets de red ni procesos en runtime.
 docker compose -f docker/docker-compose.yml build
+docker build -t ecowarm-api:latest ./api
 
 echo "Pipeline de integración completado. Artefactos binarios inyectados exitosamente en las imágenes contenedoras."

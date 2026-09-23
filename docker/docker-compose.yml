@@ -82,3 +82,22 @@ networks:
 volumes:
   # Declaración del volumen nombrado administrado por el demonio de Docker.
   ecowarm_data:
+
+  api:
+    build:
+      context: ../api
+      dockerfile: Dockerfile
+    image: ecowarm-api:latest
+    container_name: ecowarm_api
+    ports:
+      - "8080:8080"
+    depends_on:
+      - postgres
+      - mosquitto
+    environment:
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://postgres:5432/ecowarm
+      - SPRING_DATASOURCE_USERNAME=ecowarm_user
+      - SPRING_DATASOURCE_PASSWORD=ecowarmpass
+      - MQTT_BROKER_URL=tcp://mosquitto:1883
+    networks:
+      - iot-network
