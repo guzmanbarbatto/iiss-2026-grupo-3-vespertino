@@ -1,30 +1,26 @@
-# Ing-Software-Grupo3: IoTEste / EcoWarm - Prototipo MQTT (Iteración 2)
+# Ing-Software-Grupo3: IoTEste / EcoWarm - API REST y Termostato (Iteración 3)
 
-Este repositorio contiene la segunda iteración del producto exploratorio de domótica EcoWarm para IoTEste. El objetivo principal de esta etapa es consolidar la definición del alcance del producto, migrar la compilación a Maven, implementar la persistencia de datos de las habitaciones e integrar un generador de eventos automatizado mediante Docker.
+Este repositorio contiene la tercera iteración del prototipo exploratorio de domótica EcoWarm para IoTEste[cite: 3, 4]. El objetivo principal de esta etapa es exponer una API REST completa (Nivel 2 de Richardson) para el CRUD de habitaciones y el envío de comandos/tareas, proteger el acceso mediante autenticación Bearer Token, e integrar la lógica de control del termostato junto a un stub del switch.
 
 ## Gestión del Proyecto
-* **Tablero Jira:** https://cure-software.atlassian.net/jira/software/projects/INGSOF/boards/1
+* **Tablero Jira:** https://cure-software.atlassian.net/jira/software/projects/INGSOF/boards/1[cite: 4]
 
 ## Estructura del Repositorio
-El repositorio crece de forma incremental y está organizado de la siguiente manera:
-* `/docs/vision.md`: Documento de Visión del Producto (versión 2).
-* `/docs/metodologia.md`: Declaración y justificación de la metodología ágil adoptada (Scrumban).
-* `/docs/producto/`: Documentación de diseño con los Escenarios, Historias de Usuario y Características de EcoWarm.
-* `/docker/docker-compose.yml`: Archivo de orquestación que define y levanta el broker Mosquitto, el Generador de eventos (Java) y el Receptor/Suscriptor (Java) en una misma red.
-* `/scripts/`: Directorio con scripts en Bash para gestionar la infraestructura.
-* `/src/`: Código fuente de los dos clientes Java (Generador y Receptor), ahora estructurados como módulos Maven.
-* `/.github/workflows/maven.yml`: Pipeline de GitHub Actions para la Integración Continua (CI).
+* `/docs/api/openapi.yaml`: Definición técnica OpenAPI 3.0 de la API REST[cite: 3].
+* `/docs/vision.md`: Documento de Visión del Producto (Actualizado a Iteración 3)[cite: 4, 5].
+* `/docs/metodologia.md`: Declaración y gestión metodológica en Scrumban[cite: 4, 40].
+* `/docs/producto/`: Escenarios, Historias de Usuario (HU-1 a HU-5) y Características de EcoWarm[cite: 4, 42].
+* `/docker/docker-compose.yml`: Orquestación de Mosquitto Broker, PostgreSQL, Suscriptor, Generador y API REST Spring Boot.
+* `/scripts/`:
+  * `build.sh`: Compila los módulos Maven aislados mediante Docker[cite: 3, 29].
+  * `up.sh`: Construye e inicia todos los servicios en segundo plano[cite: 4, 27].
+  * `down.sh` / `stop.sh`: Detención y limpieza de contenedores y redes[cite: 4, 25, 36].
+  * `test_api_curl.sh`: Suite de validación E2E para la API REST mediante cURL con autenticación[cite: 3].
+* `/api/`: Módulo Spring Boot con la API REST, seguridad Bearer, comandos y motor del termostato[cite: 3, 24, 26].
 
-## Descripción de los Scripts
-Los scripts automatizan las tareas repetitivas del entorno de desarrollo sin depender de herramientas locales:
-* `build.sh`: Compila todo el sistema y empaqueta los módulos Maven estrictamente mediante Docker (no requiere Java ni Maven instalados en el host).
-* `up.sh`: Construye las imágenes y levanta toda la infraestructura en segundo plano (`docker compose up --build -d`). Esto inicia automáticamente el Broker, el Generador de eventos y el Receptor.
-* `stop.sh`: Detiene los contenedores en ejecución sin destruir los recursos.
-* `down.sh`: Detiene y elimina los contenedores, redes y volúmenes creados.
+## Despliegue y Ejecución
 
-## Cómo levantar (y bajar) el sistema
-Todo el proceso ocurre dentro de Docker. Abre tu terminal en la raíz del proyecto y ejecuta:
-
-1. **Para compilar el proyecto:**
-   ```bash
-   ./scripts/build.sh
+### 1. Compilación
+Para empaquetar los módulos Maven dentro del entorno aislado de Docker[cite: 3, 4]:
+```bash
+./scripts/build.sh
