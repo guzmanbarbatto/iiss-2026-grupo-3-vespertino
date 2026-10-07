@@ -57,20 +57,6 @@ services:
     networks:
       - iot-network
 
-  # Despliegue del cliente publicador asíncrono (Event Generator).
-  event-generator:
-    build:
-      context: ..
-      dockerfile: generador/Dockerfile
-    container_name: iot_generator
-    environment:
-      MQTT_BROKER_URL: tcp://mosquitto-broker:1883
-    depends_on:
-      # Condicionamiento de arranque secuencial respecto al broker MQTT.
-      - mosquitto-broker
-    networks:
-      - iot-network
-
   # Despliegue de la API REST y el Termostato Asíncrono (Sprint 3)
   api:
     build:
