@@ -1,13 +1,12 @@
 #!/bin/bash
 # ==============================================================================
 # Script: up.sh
-# Descripción: Construye la imagen de Java (si hay cambios) y levanta toda la
-#              infraestructura (Broker y Suscriptor) en segundo plano mediante
-#              docker-compose.
+# Descripción: Construye las imágenes y levanta toda la infraestructura
+#              (Broker, Controlador Engine y Simulador) en segundo plano.
 # ==============================================================================
 
 echo "=========================================="
-echo "    Levantando infraestructura IoTEste    "
+echo "    Levantando infraestructura EcoWarm    "
 echo "=========================================="
 
 # Navegamos al directorio donde se encuentra el docker-compose.yml
@@ -22,11 +21,10 @@ fi
 
 echo "Iniciando contenedores (docker-compose up -d --build)..."
 
-# Este comando construye la imagen del suscriptor Java y levanta ambos servicios
-# en modo "detached" (-d, en segundo plano) para no bloquear la terminal.
+# Este comando construye las imágenes y levanta los servicios
 docker-compose up -d --build
 
 echo "------------------------------------------"
 echo "✅ Infraestructura operativa."
-echo "Broker MQTT (Mosquitto) y Suscriptor Java corriendo correctamente."
-echo "Para ver en vivo lo que imprime el código Java, ejecuta: docker logs -f iot_java_subscriber"
+echo "Broker MQTT, Controlador (Engine) y Simulador corriendo correctamente."
+echo "Para ver en vivo los logs del controlador, ejecuta: docker logs -f ecowarm-engine"

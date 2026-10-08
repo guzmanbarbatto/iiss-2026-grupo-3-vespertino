@@ -2,21 +2,21 @@
 
 # Configuración del entorno
 BASE_URL="http://localhost:8080/api/v1"
-TOKEN="token_secreto_desarrollo_123" # Este valor debe coincidir con el que Sebas configure en INGSOF-26
-HEADERS=(-H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json")
+
+# 1. ELIMINAMOS LA SEGURIDAD: Como borramos la carpeta 'security', ya no necesitamos el Token.
+# Solo dejamos el Content-Type para que Spring sepa que le mandamos JSON.
+HEADERS=(-H "Content-Type: application/json")
 
 echo "================================================="
-echo "Iniciando Validación E2E - API EcoWarm (INGSOF-32)"
+echo "Iniciando Validación E2E - API EcoWarm (Iteración 4)"
 echo "================================================="
 
-# 1. Crear Habitación (POST)
+# 2. ACTUALIZAMOS EL PAYLOAD: Agregamos el atributo "consumo" que la cátedra exigió para esta iteración.
 echo -n "1. POST   /habitaciones (Creando registro)... "
-PAYLOAD='{"nombre": "Sala de Servidores", "temperaturaEsperada": 20.0, "idTermostato": "TERM_01", "idSwitch": "SW_01"}'
-# El flag -w "%{http_code}" extrae solo el status, y -o /dev/null oculta el JSON de respuesta.
+PAYLOAD='{"nombre": "Sala de Servidores", "temperaturaEsperada": 20.0, "idTermostato": "TERM_01", "idSwitch": "SW_01", "consumo": 1500.0}'
 HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "${BASE_URL}/habitaciones" "${HEADERS[@]}" -d "$PAYLOAD")
 echo "HTTP $HTTP_CODE"
 
-# Asumimos el ID 1 para continuar el flujo transaccional. Si la BD no se reinicia, este ID podría variar.
 HAB_ID=1
 SWITCH_ID="SW_01"
 

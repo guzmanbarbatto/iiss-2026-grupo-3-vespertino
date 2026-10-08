@@ -21,7 +21,6 @@ fi
 
 echo "Destruyendo contenedores y redes (docker-compose down)..."
 
-# Este es el comando clave que destruye lo que levantamos en el Sprint 1
 docker-compose down
 
 echo "------------------------------------------"
