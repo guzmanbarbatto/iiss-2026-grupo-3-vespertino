@@ -1,15 +1,4 @@
 services:
-  # Instanciación del broker MQTT.
-  mosquitto-broker:
-    image: eclipse-mosquitto:2.0
-    container_name: iot_mosquitto
-    ports:
-      - "1883:1883"
-    volumes:
-      - ./mosquitto.conf:/mosquitto/config/mosquitto.conf
-    networks:
-      - iot-network
-
   # Aprovisionamiento de PostgreSQL para guardar la configuración persistente.
   postgres-db:
     image: postgres:15-alpine
@@ -42,14 +31,14 @@ services:
     depends_on:
       postgres-db:
         condition: service_healthy
-      mosquitto-broker:
-        condition: service_started
     environment:
       - DB_URL=jdbc:postgresql://postgres-db:5432/ecowarm
       - DB_USER=ecowarm_user
       - DB_PASS=ecowarmpass
-      - MQTT_BROKER_URL=tcp://mosquitto-broker:1883
-      - STUB_URL=http://simulador:8081/api/v1/switches/{idSwitch}/acciones 
+      - MQTT_BROKER_URL=tcp://host.docker.internal:1883
+      - SIMULADOR_URL=http://host.docker.internal:9090
+      - APP_API_KEY=clave-secreta-grupo-3
+      - SIMULADOR_API_KEY=clave-simulador-catedra 
     networks:
       - iot-network
 

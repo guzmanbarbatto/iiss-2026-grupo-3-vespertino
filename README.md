@@ -1,42 +1,66 @@
-# Ing-Software-Grupo3: IoTEste / EcoWarm - Prototipo MQTT (Iteración 3)
+# EcoWarm - Sistema de Domótica Inteligente 🌡️ (Iteración 4)
 
-Este repositorio contiene la tercera iteración del producto exploratorio de domótica EcoWarm para IoTEste. El objetivo principal de esta etapa es la construcción de una API REST utilizando Spring Boot (Java 25), la implementación de un modelo de persistencia relacional con PostgreSQL, la integración de seguridad mediante Autenticación Bearer y el acoplamiento de la lógica asíncrona del termostato vía MQTT.
+EcoWarm es un sistema backend de control domótico diseñado para gestionar la calefacción de hogares, optimizando el consumo energético en base a la temperatura ambiente y las restricciones de la Tarifa Punta eléctrica.
 
-## Gestión del Proyecto
-* **Tablero Jira:** https://cure-software.atlassian.net/jira/software/projects/INGSOF/boards/1
+Esta versión (Iteración 4) implementa una **Arquitectura Multi-Módulo (Hexagonal)**, separa el dominio puro (TDD) de la infraestructura, y cumple con el contrato OpenAPI v2.0 establecido por la cátedra para la interoperabilidad.
 
-## Estructura del Repositorio
-El repositorio crece de forma incremental y está organizado bajo una estructura multi-módulo de Maven:
+## 🏗️ Arquitectura Multi-Módulo
 
-* /docs/vision.md: Documento de Visión del Producto (versión actualizada).
-* /docs/metodologia.md: Declaración y justificación de la metodología ágil adoptada (Scrumban).
-* /docs/producto/: Documentación de diseño con los Escenarios, Historias de Usuario y Características de EcoWarm.
-* /docker/docker-compose.yml: Archivo de orquestación que define y levanta el ecosistema completo en una misma red: Broker Mosquitto, Base de Datos PostgreSQL, API Spring     Boot, Generador de eventos y Receptor/Suscriptor.
-* /scripts/: Directorio con scripts en Bash para gestionar la infraestructura y realizar pruebas.
-* /api/, /generador/, /subscriber/: Código fuente de los microservicios y clientes Java, estructurados como submódulos Maven independientes que heredan de un POM padre.
-* /.github/workflows/maven.yml: Pipeline de GitHub Actions para la Integración Continua (CI).
+El proyecto está dividido en dos módulos Maven principales:
+* **`core`**: Cerebro matemático del sistema. Escrito en Java puro, sin frameworks. Contiene el modelo de dominio y la evaluación de reglas tarifarias.
+* **`engine`**: Adaptador de infraestructura (Spring Boot). Expone la API REST segura, se suscribe a sensores vía MQTT (Eclipse Paho) y persiste el estado en PostgreSQL.
 
-## Descripción de los Scripts
+## 🚀 Requisitos Previos
 
-Los scripts automatizan las tareas repetitivas del entorno de desarrollo sin depender de herramientas locales:
+* **Docker y Docker Compose** instalados (para la infraestructura de BD y Broker).
+* **Simulador Oficial de la Cátedra** (provisto externamente).
+* Java 25 y Maven 3.9 (opcional si se utiliza el script de construcción por Docker).
 
-* build.sh: Compila todo el ecosistema y empaqueta los módulos Maven estrictamente mediante una etapa constructora en Docker (Java 25). No requiere Java ni Maven           instalados en el host.
-* up.sh: Construye las imágenes y levanta toda la infraestructura en segundo plano (docker-compose up -d --build). Esto inicia automáticamente la Base de Datos, el Broker, la API y los clientes MQTT.
-* test_api_curl.sh: Script de validación E2E (End-to-End) que ejecuta peticiones HTTP automáticas contra el contenedor de la API para probar el CRUD de habitaciones, la actualización de temperaturas y los comandos de los switches.
-* stop.sh: Detiene los contenedores en ejecución sin destruir los recursos.
-* down.sh: Detiene y elimina los contenedores, redes y volúmenes creados.
+## 🛠️ Cómo compilar y correr el sistema
 
-## Cómo levantar (y bajar) el sistema
-Todo el proceso ocurre dentro de Docker. Abre tu terminal en la raíz del proyecto y ejecuta:
+Todo el ciclo de vida de la aplicación está automatizado en la carpeta `/scripts`.
 
-1. **Para compilar el proyecto:**
+1. **Construir el sistema y correr tests:**
+   Desde la raíz del proyecto, ejecuta:
    ```bash
    ./scripts/build.sh
+   ```
+   *Nota: Este paso descarga las dependencias, ejecuta los tests unitarios del `core` y construye la imagen Docker del `engine`.*
 
-2. **Para levantar la infraestructura:**
+2. **Levantar la infraestructura:**
    ```bash
    ./scripts/up.sh
+   ```
+   Esto levantará en segundo plano:
+   * **PostgreSQL:** Puerto `5432`
+   * **Mosquitto (MQTT):** Puerto `1883`
+   * **Engine (API REST):** Puerto `8080`
 
-3. **Para validar la API Rest:**
+3. **Apagar la infraestructura:**
    ```bash
-   ./scripts/test_api_curl.sh      
+   ./scripts/down.sh
+   ```
+
+## 🔌 Integración con el Simulador (Iteración 4)
+
+El sistema está configurado para integrarse automáticamente con el simulador externo proporcionado.
+
+### Pasos de integración:
+1. Asegúrate de levantar el Simulador en tu máquina host antes (o inmediatamente después) de levantar EcoWarm. El simulador debe escuchar en el puerto **`9090`**.
+2. EcoWarm utilizará la URL `http://host.docker.internal:9090` para comunicarse con el simulador desde adentro de su contenedor Docker.
+3. El `Engine` enviará automáticamente los comandos `ON`/`OFF` a los relés mediante peticiones seguras utilizando el token definido en la variable de entorno `SIMULADOR_API_KEY`.
+
+### Seguridad (API Keys)
+Todas las peticiones a la API REST de nuestro `engine` (puerto `8080`) están protegidas. Para interactuar con nuestro controlador, se debe enviar el siguiente Header HTTP:
+* **Header:** `X-API-Key`
+* **Valor por defecto:** `clave-secreta-grupo-3` (Configurable en el `docker-compose.yml`).
+
+## 🧪 Pruebas Unitarias (TDD)
+
+Las reglas de negocio estrictas de encendido y apagado están cubiertas al 100% por pruebas unitarias de caja negra, validando límites de tiempo y potencia.
+
+Para correr las pruebas manualmente sin levantar contenedores, ejecuta:
+```bash
+mvn test -pl modules/core
+```
+Ver detalles del diseño de pruebas en: `/docs/tests/criterio-tests.md`.

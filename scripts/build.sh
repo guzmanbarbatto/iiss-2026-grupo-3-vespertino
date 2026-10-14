@@ -1,10 +1,9 @@
 #!/bin/bash
 
-echo "Construyendo las imágenes de los contenedores..."
+echo "🚀 Construyendo la infraestructura de EcoWarm (Iteración 4)..."
 
-# Construcción de los servicios definidos en el compose 
+# El docker-compose ya sabe dónde está el Dockerfile. 
+# Al ejecutar esto, Maven va a compilar el core, correr los 10 tests TDD, y armar la imagen del engine.
 docker compose -f docker/docker-compose.yml build
 
-docker build -t ecowarm-engine:latest -f modules/engine/Dockerfile .
-
-echo "Pipeline completado. Imágenes listas para levantar."
+echo "✅ Pipeline completado. Imágenes listas para levantar."

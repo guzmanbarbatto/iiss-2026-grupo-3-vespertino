@@ -6,7 +6,7 @@ WORKDIR /app
 COPY . .
 
 # Compilamos exclusivamente el nuevo módulo 'engine' y sus dependencias (-am)
-RUN mvn clean package -pl modules/engine -am
+RUN mvn clean package -pl modules/engine -am 
 
 # Etapa 2: Ejecución (Run Stage)
 FROM eclipse-temurin:25-jre-alpine
