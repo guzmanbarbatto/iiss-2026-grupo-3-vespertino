@@ -23,6 +23,12 @@ public class EvaluadorCore {
 
         // Evaluamos habitación por habitación
         for (HabitacionDTO hab : habitaciones) {
+            //Si la habitacion tiene estado desconocido le decimos que se apague
+            if (hab.estadoActual() == EstadoSwitch.DESCONOCIDO) {
+                ordenes.add(new Orden(hab.id(), AccionSwitch.OFF));
+                continue;
+            }
+
             boolean necesitaCalor = hab.temperaturaActual() < hab.temperaturaEsperada();
 
             if (esPunta) {

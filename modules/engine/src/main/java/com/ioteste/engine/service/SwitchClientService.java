@@ -1,6 +1,7 @@
 package com.ioteste.engine.service;
 
 import com.ioteste.engine.domain.ComandoSwitch;
+import com.ioteste.engine.domain.EstadoSwitchResponse;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
@@ -42,4 +43,16 @@ public class SwitchClientService {
             System.err.println("Fallo al comandar el switch " + idSwitch + " - " + e.getMessage());
         }
     }
+
+    public EstadoSwitchResponse consultarEstado(String urlSwitch, String idSwitch) {
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.set("X-API-Key", simuladorApiKey);
+
+        String url = urlSwitch + "/switches/" + idSwitch;
+        HttpEntity<Void> request = new HttpEntity<>(headers);
+
+        return restTemplate.exchange(url, HttpMethod.GET, request, EstadoSwitchResponse.class).getBody();
+    }
+
 }
