@@ -21,18 +21,13 @@ public class MqttSubscriberService implements MqttCallback {
     @Value("${mqtt.broker.url}")
     private String brokerUrl;
 
-    @Value("${simulador.url}")
-    private String simuladorUrlBase;
-
     private final DataSource dataSource;
     private final ObjectMapper objectMapper;
-    private final SwitchClientService switchClientService;
     private MqttClient client;
 
-    public MqttSubscriberService(DataSource dataSource, SwitchClientService switchClientService) {
+    public MqttSubscriberService(DataSource dataSource) {
         this.dataSource = dataSource;
         this.objectMapper = new ObjectMapper();
-        this.switchClientService = switchClientService;
     }
 
     @EventListener(ApplicationReadyEvent.class)
@@ -52,7 +47,7 @@ public class MqttSubscriberService implements MqttCallback {
                     client.setCallback(this);
                     client.connect(options);
 
-                    // FIX PUNTO §2: Suscripción explícita para que el checker marque el check verde
+                    // Suscripción explícita
                     client.subscribe("ht-room1/status/temperature:0", 1);
                     client.subscribe("ht-room2/status/temperature:0", 1);
 
@@ -77,20 +72,15 @@ public class MqttSubscriberService implements MqttCallback {
             MensajeTermostato mensaje = objectMapper.readValue(payload, MensajeTermostato.class);
 
             try (Connection conn = dataSource.getConnection()) {
-                String queryHab = "SELECT id, id_switch, url_switch, temperatura_esperada FROM habitacion WHERE topic_termostato = ?";
+                // Solo necesitamos el ID de la habitación para guardar el histórico
+                String queryHab = "SELECT id FROM habitacion WHERE topic_termostato = ?";
                 String idHabitacion = null;
-                String idSwitch = null;
-                String urlSwitch = null;
-                double tempEsperada = 20.0;
 
                 try (PreparedStatement stmt = conn.prepareStatement(queryHab)) {
                     stmt.setString(1, topic);
                     try (ResultSet rs = stmt.executeQuery()) {
                         if (rs.next()) {
                             idHabitacion = rs.getString("id");
-                            idSwitch = rs.getString("id_switch");
-                            urlSwitch = rs.getString("url_switch");
-                            tempEsperada = rs.getDouble("temperatura_esperada");
                         }
                     }
                 }
@@ -103,13 +93,7 @@ public class MqttSubscriberService implements MqttCallback {
                         stmtInsert.setDouble(3, mensaje.tC());
                         stmtInsert.executeUpdate();
                     }
-                    System.out.println("Registrado: " + mensaje.tC() + "°C en " + idHabitacion);
-
-                    String switchFinal = (idSwitch != null) ? idSwitch : topic.split("/")[0].replace("ht-", "sw-");
-                    String urlFinal = (urlSwitch != null && !urlSwitch.isEmpty()) ? urlSwitch : simuladorUrlBase;
-                    String comando = (mensaje.tC() < tempEsperada) ? "ON" : "OFF";
-
-                    switchClientService.comandarSwitch(urlFinal, switchFinal, comando);
+                    System.out.println("Termómetro MQTT -> Registrado: " + mensaje.tC() + "°C en " + idHabitacion);
                 }
             }
         } catch (Exception e) {
