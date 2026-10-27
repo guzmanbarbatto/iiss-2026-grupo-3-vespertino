@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>EvaluadorCore.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">core</a> &gt; <a href="index.source.html" class="el_package">com.ioteste.core.service</a> &gt; <span class="el_source">EvaluadorCore.java</span></div><h1>EvaluadorCore.java</h1><pre class="source lang-java linenums">package com.ioteste.core.service;
+
+import com.ioteste.core.domain.AccionSwitch;
+import com.ioteste.core.domain.EstadoSwitch;
+import com.ioteste.core.domain.HabitacionDTO;
+import com.ioteste.core.domain.Orden;
+import com.ioteste.core.domain.Salida;
+import com.ioteste.core.domain.TarifaPunta;
+
+import java.time.DayOfWeek;
+import java.time.LocalTime;
+import java.time.ZonedDateTime;
+import java.util.ArrayList;
+import java.util.List;
+
+<span class="fc" id="L16">public class EvaluadorCore {</span>
+
+    public Salida evaluarEstado(
+            ZonedDateTime fechaHora,
+            double potenciaContratadaKW,
+            TarifaPunta tarifa,
+            List&lt;HabitacionDTO&gt; habitaciones) {
+
+<span class="fc" id="L24">        List&lt;Orden&gt; ordenes = new ArrayList&lt;&gt;();</span>
+<span class="fc" id="L25">        boolean esPunta = enTarifaPunta(fechaHora, tarifa);</span>
+<span class="fc" id="L26">        double potenciaEnUso = 0.0;</span>
+
+        // Primero calculamos cuánta potencia ya está tomada por habitaciones encendidas
+<span class="fc bfc" id="L29" title="All 2 branches covered.">        for (HabitacionDTO hab : habitaciones) {</span>
+<span class="fc bfc" id="L30" title="All 2 branches covered.">            if (hab.estadoActual() == EstadoSwitch.ON) {</span>
+<span class="fc" id="L31">                potenciaEnUso += hab.potenciaKW();</span>
+            }
+<span class="fc" id="L33">        }</span>
+
+        // Evaluamos habitación por habitación
+<span class="fc bfc" id="L36" title="All 2 branches covered.">        for (HabitacionDTO hab : habitaciones) {</span>
+<span class="fc bfc" id="L37" title="All 2 branches covered.">            boolean necesitaCalor = hab.temperaturaActual() &lt; hab.temperaturaEsperada();</span>
+
+<span class="fc bfc" id="L39" title="All 2 branches covered.">            if (esPunta) {</span>
+                // REGLA 1: Si es tarifa punta, apagar todo lo que esté prendido
+<span class="pc bpc" id="L41" title="1 of 2 branches missed.">                if (hab.estadoActual() == EstadoSwitch.ON) {</span>
+<span class="fc" id="L42">                    ordenes.add(new Orden(hab.id(), AccionSwitch.OFF));</span>
+<span class="fc" id="L43">                    potenciaEnUso -= hab.potenciaKW(); // Liberamos potencia</span>
+                }
+            } else {
+<span class="fc bfc" id="L46" title="All 4 branches covered.">                if (!necesitaCalor &amp;&amp; hab.estadoActual() == EstadoSwitch.ON) {</span>
+                    // REGLA 2: Si ya llegó a la temperatura, apagar
+<span class="fc" id="L48">                    ordenes.add(new Orden(hab.id(), AccionSwitch.OFF));</span>
+<span class="fc" id="L49">                    potenciaEnUso -= hab.potenciaKW(); // Liberamos potencia</span>
+<span class="fc bfc" id="L50" title="All 4 branches covered.">                } else if (necesitaCalor &amp;&amp; hab.estadoActual() == EstadoSwitch.OFF) {</span>
+                    // REGLA 3: Si tiene frío, prender SOLO si la llave general lo soporta
+<span class="fc bfc" id="L52" title="All 2 branches covered.">                    if ((potenciaEnUso + hab.potenciaKW()) &lt;= potenciaContratadaKW) {</span>
+<span class="fc" id="L53">                        ordenes.add(new Orden(hab.id(), AccionSwitch.ON));</span>
+<span class="fc" id="L54">                        potenciaEnUso += hab.potenciaKW(); // Ocupamos potencia</span>
+                    }
+                }
+            }
+<span class="fc" id="L58">        }</span>
+
+<span class="fc" id="L60">        return new Salida(ordenes);</span>
+    }
+
+    private boolean enTarifaPunta(ZonedDateTime fechaHora, TarifaPunta tarifa) {
+<span class="fc" id="L64">        LocalTime horaActual = fechaHora.toLocalTime();</span>
+<span class="fc" id="L65">        DayOfWeek diaActual = fechaHora.getDayOfWeek();</span>
+
+        // Si el día de hoy no está en la lista de días de la tarifa, nunca es punta
+<span class="fc bfc" id="L68" title="All 2 branches covered.">        if (!tarifa.dias().contains(diaActual)) {</span>
+<span class="fc" id="L69">            return false;</span>
+        }
+
+        // Verificamos si la hora cae dentro del rango semiabierto [desde, hasta)
+<span class="fc bfc" id="L73" title="All 4 branches covered.">        return !horaActual.isBefore(tarifa.desde()) &amp;&amp; horaActual.isBefore(tarifa.hasta());</span>
+    }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.15.202606040825</span></div></body></html>
