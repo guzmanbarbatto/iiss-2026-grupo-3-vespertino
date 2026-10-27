@@ -1,6 +1,12 @@
 package com.ioteste.core.service;
 
-import com.ioteste.core.domain.*;
+import com.ioteste.core.domain.AccionSwitch;
+import com.ioteste.core.domain.EstadoSwitch;
+import com.ioteste.core.domain.HabitacionDTO;
+import com.ioteste.core.domain.Orden;
+import com.ioteste.core.domain.Salida;
+import com.ioteste.core.domain.TarifaPunta;
+
 import java.time.DayOfWeek;
 import java.time.LocalTime;
 import java.time.ZonedDateTime;
@@ -9,7 +15,12 @@ import java.util.List;
 
 public class EvaluadorCore {
 
-    public Salida evaluarEstado(ZonedDateTime fechaHora, double potenciaContratadaKW, TarifaPunta tarifa, List<HabitacionDTO> habitaciones) {
+    public Salida evaluarEstado(
+            ZonedDateTime fechaHora,
+            double potenciaContratadaKW,
+            TarifaPunta tarifa,
+            List<HabitacionDTO> habitaciones) {
+
         List<Orden> ordenes = new ArrayList<>();
         boolean esPunta = enTarifaPunta(fechaHora, tarifa);
         double potenciaEnUso = 0.0;
@@ -36,8 +47,7 @@ public class EvaluadorCore {
                     // REGLA 2: Si ya llegó a la temperatura, apagar
                     ordenes.add(new Orden(hab.id(), AccionSwitch.OFF));
                     potenciaEnUso -= hab.potenciaKW(); // Liberamos potencia
-                } 
-                else if (necesitaCalor && hab.estadoActual() == EstadoSwitch.OFF) {
+                } else if (necesitaCalor && hab.estadoActual() == EstadoSwitch.OFF) {
                     // REGLA 3: Si tiene frío, prender SOLO si la llave general lo soporta
                     if ((potenciaEnUso + hab.potenciaKW()) <= potenciaContratadaKW) {
                         ordenes.add(new Orden(hab.id(), AccionSwitch.ON));

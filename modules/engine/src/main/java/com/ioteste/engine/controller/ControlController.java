@@ -1,9 +1,11 @@
 package com.ioteste.engine.controller;
 
-import com.ioteste.engine.domain.EstadoControl;
 import com.ioteste.engine.domain.ComandoControl;
+import com.ioteste.engine.domain.EstadoControl;
+import com.ioteste.engine.service.EvaluadorJobService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
@@ -17,6 +19,13 @@ public class ControlController {
     private String fechaHora = null;
     private Double factorTiempo = null;
     private String iniciadoEn = null;
+
+    // Dependencia del motor para propagar el factor de aceleración
+    private final EvaluadorJobService evaluadorJobService;
+
+    public ControlController(EvaluadorJobService evaluadorJobService) {
+        this.evaluadorJobService = evaluadorJobService;
+    }
 
     @GetMapping
     public ResponseEntity<EstadoControl> obtenerControl() {
@@ -36,15 +45,23 @@ public class ControlController {
             this.factorTiempo = (comando.factorTiempo() != null) ? comando.factorTiempo() : 1.0;
             
             // Genera la hora real del servidor en formato ISO-8601 (UTC)
-            this.iniciadoEn = Instant.now().atOffset(ZoneOffset.UTC).format(DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'"));
+            this.iniciadoEn = Instant.now().atOffset(ZoneOffset.UTC)
+                    .format(DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'"));
+            
+            // Notificar al motor para que arranque con el factor de aceleración
+            evaluadorJobService.iniciarMotor(this.factorTiempo, this.fechaHora);
             
         } else if ("DETENER".equals(comando.accion())) {
             this.estado = "DETENIDO";
             this.fechaHora = null;
             this.factorTiempo = null;
             this.iniciadoEn = null;
+
+            // Notificar al motor para que se detenga
+            evaluadorJobService.detenerMotor();
         } else {
-            return ResponseEntity.badRequest().build(); // Rechaza si la acción no es válida
+            // Rechaza si la acción no es válida
+            return ResponseEntity.badRequest().build(); 
         }
         
         return ResponseEntity.ok(new EstadoControl(estado, fechaHora, factorTiempo, iniciadoEn));

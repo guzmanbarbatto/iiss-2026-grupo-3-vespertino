@@ -1,0 +1,7 @@
+com\ioteste\core\domain\TarifaPunta.class
+com\ioteste\core\service\EvaluadorCore.class
+com\ioteste\core\domain\EstadoSwitch.class
+com\ioteste\core\domain\Orden.class
+com\ioteste\core\domain\AccionSwitch.class
+com\ioteste\core\domain\Salida.class
+com\ioteste\core\domain\HabitacionDTO.class

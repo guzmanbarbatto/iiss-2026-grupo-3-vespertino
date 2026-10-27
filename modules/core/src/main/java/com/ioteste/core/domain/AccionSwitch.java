@@ -1,3 +1,6 @@
 package com.ioteste.core.domain;
 
-public enum AccionSwitch { ON, OFF }
+public enum AccionSwitch {
+    ON,
+    OFF
+}

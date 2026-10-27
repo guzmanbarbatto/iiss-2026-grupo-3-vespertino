@@ -40,7 +40,19 @@ INSERT INTO sitio (id, nombre, potencia_contratada_kw, tarifa_desde, tarifa_hast
 VALUES ('sitio-1', 'Casa Catedra', 100.0, '18:00', '22:00', 'MONDAY,TUESDAY');
 
 INSERT INTO habitacion (id, sitio_id, nombre, temperatura_esperada, potencia_kw, id_termostato, topic_termostato, id_switch, url_switch) 
-VALUES ('hab-1', 'sitio-1', 'Cuarto 1', 20.0, 2.0, 'ht-room1', 'ht-room1/status/temperature:0', 'sw-room1', 'http://host.docker.internal:9090');
+VALUES ('hab-1', 'sitio-1', 'Cuarto 1', 20.0, 2.0, 'ht-room1', 'ht-room1/status/temperature:0', 'sw-room1', 'http://localhost:9090');
 
 INSERT INTO habitacion (id, sitio_id, nombre, temperatura_esperada, potencia_kw, id_termostato, topic_termostato, id_switch, url_switch) 
-VALUES ('hab-2', 'sitio-1', 'Cuarto 2', 20.0, 2.0, 'ht-room2', 'ht-room2/status/temperature:0', 'sw-room2', 'http://host.docker.internal:9090');
+VALUES ('hab-2', 'sitio-1', 'Cuarto 2', 20.0, 2.0, 'ht-room2', 'ht-room2/status/temperature:0', 'sw-room2', 'http://localhost:9090');
+
+INSERT INTO habitacion (id, sitio_id, nombre, temperatura_esperada, potencia_kw, id_termostato, topic_termostato, id_switch, url_switch) 
+VALUES ('hab-3', 'sitio-1', 'Cuarto 3', 20.0, 2.0, 'ht-room3', 'ht-room3/status/temperature:0', 'sw-room3', 'http://localhost:9090');
+
+INSERT INTO habitacion (id, sitio_id, nombre, temperatura_esperada, potencia_kw, id_termostato, topic_termostato, id_switch, url_switch) 
+VALUES ('hab-4', 'sitio-1', 'Cuarto 4', 20.0, 2.0, 'ht-room4', 'ht-room4/status/temperature:0', 'sw-room4', 'http://localhost:9090');
+
+INSERT INTO habitacion (id, sitio_id, nombre, temperatura_esperada, potencia_kw, id_termostato, topic_termostato, id_switch, url_switch) 
+VALUES ('hab-5', 'sitio-1', 'Cuarto 5', 20.0, 2.0, 'ht-room5', 'ht-room5/status/temperature:0', 'sw-room5', 'http://localhost:9090');
+
+INSERT INTO habitacion (id, sitio_id, nombre, temperatura_esperada, potencia_kw, id_termostato, topic_termostato, id_switch, url_switch) 
+VALUES ('hab-6', 'sitio-1', 'Cuarto 6', 20.0, 2.0, 'ht-room6', 'ht-room6/status/temperature:0', 'sw-room6', 'http://localhost:9090');

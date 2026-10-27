@@ -19,7 +19,7 @@
         <maven.compiler.target>25</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 
-        <!-- Versiones -->
+        <!-- Versiones de dependencias -->
         <paho.version>1.2.5</paho.version>
         <postgresql.version>42.7.2</postgresql.version>
         <json.version>20240303</json.version>
@@ -27,11 +27,16 @@
         <spring.boot.version>3.5.14</spring.boot.version>
         <junit.version>5.11.0</junit.version>
         <mockito.version>5.14.0</mockito.version>
+
+        <!-- Versiones de Plugins para Sprint 5 -->
+        <surefire.version>3.5.0</surefire.version>
+        <jacoco.version>0.8.15</jacoco.version>
+        <checkstyle.version>3.6.0</checkstyle.version>
     </properties>
 
     <dependencyManagement>
         <dependencies>
-            <!-- Spring Boot BOM (Centraliza las versiones de Spring) -->
+            <!-- Spring Boot BOM -->
             <dependency>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-dependencies</artifactId>
@@ -74,4 +79,86 @@
             </dependency>
         </dependencies>
     </dependencyManagement>
+
+    <build>
+        <pluginManagement>
+            <plugins>
+                <!-- Plugin para ejecutar los tests de JUnit 5 -->
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-surefire-plugin</artifactId>
+                    <version>3.5.0</version>
+                    <dependencies>
+                        <dependency>
+                            <groupId>org.junit.jupiter</groupId>
+                            <artifactId>junit-jupiter-engine</artifactId>
+                            <version>5.10.0</version>
+                        </dependency>
+                    </dependencies>
+                </plugin>
+
+                <!-- Plugin JaCoCo para reporte de cobertura -->
+                <plugin>
+                    <groupId>org.jacoco</groupId>
+                    <artifactId>jacoco-maven-plugin</artifactId>
+                    <version>${jacoco.version}</version>
+                    <executions>
+                        <execution>
+                            <goals>
+                                <goal>prepare-agent</goal>
+                            </goals>
+                        </execution>
+                        <execution>
+                            <id>report</id>
+                            <phase>test</phase>
+                            <goals>
+                                <goal>report</goal>
+                            </goals>
+                        </execution>
+                        <execution>
+                            <id>jacoco-check</id>
+                            <goals>
+                                <goal>check</goal>
+                            </goals>
+                            <configuration>
+                                <rules>
+                                    <rule>
+                                        <element>BUNDLE</element>
+                                        <limits>
+                                            <limit>
+                                                <counter>INSTRUCTION</counter>
+                                                <value>COVEREDRATIO</value>
+                                                <minimum>0.85</minimum>
+                                            </limit>
+                                        </limits>
+                                    </rule>
+                                </rules>
+                            </configuration>
+                        </execution>
+                    </executions>
+                </plugin>
+
+                <!-- Plugin Checkstyle para Estándares de Codificación -->
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-checkstyle-plugin</artifactId>
+                    <version>${checkstyle.version}</version>
+                    <configuration>
+                        <configLocation>google_checks.xml</configLocation>
+                        <consoleOutput>true</consoleOutput>
+                        <!-- Lo ponemos en false por ahora para que solo reporte, sin frenar la compilación -->
+                        <failsOnError>false</failsOnError>
+                    </configuration>
+                    <executions>
+                        <execution>
+                            <phase>validate</phase>
+                            <goals>
+                                <goal>check</goal>
+                            </goals>
+                        </execution>
+                    </executions>
+                </plugin>
+            </plugins>
+        </pluginManagement>
+    </build>
 </project>

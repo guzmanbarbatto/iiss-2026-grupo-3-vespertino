@@ -3,7 +3,12 @@ package com.ioteste.engine.controller;
 import com.ioteste.engine.domain.InventarioDTO;
 import com.ioteste.engine.repository.SitioRepository;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+
 import java.sql.SQLException;
 
 @RestController
@@ -12,7 +17,7 @@ public class SitioController {
     
     private final SitioRepository repository;
     
-    // MAGIA: Caché en memoria para devolver EXACTAMENTE el mismo objeto que nos manda el simulador
+    // Caché en memoria para devolver EXACTAMENTE el mismo objeto que nos manda el simulador
     private InventarioDTO inventarioCache = null;
 
     public SitioController(SitioRepository repository) {

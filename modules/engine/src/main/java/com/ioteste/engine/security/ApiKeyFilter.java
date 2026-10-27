@@ -1,10 +1,15 @@
 package com.ioteste.engine.security;
 
-import jakarta.servlet.*;
+import jakarta.servlet.Filter;
+import jakarta.servlet.FilterChain;
+import jakarta.servlet.ServletException;
+import jakarta.servlet.ServletRequest;
+import jakarta.servlet.ServletResponse;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
+
 import java.io.IOException;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -35,10 +40,12 @@ public class ApiKeyFilter implements Filter {
             httpResponse.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
             httpResponse.setContentType("application/json; charset=UTF-8");
             
-            String timestamp = Instant.now().atOffset(ZoneOffset.UTC).format(DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'"));
+            String timestamp = Instant.now().atOffset(ZoneOffset.UTC)
+                    .format(DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'"));
             String jsonError = String.format(
-                "{\"timestamp\": \"%s\", \"status\": 401, \"mensaje\": \"Falta o no coincide el header X-API-Key\", \"errores\": null}", 
-                timestamp
+                    "{\"timestamp\": \"%s\", \"status\": 401, "
+                    + "\"mensaje\": \"Falta o no coincide el header X-API-Key\", \"errores\": null}", 
+                    timestamp
             );
             
             httpResponse.getWriter().write(jsonError);

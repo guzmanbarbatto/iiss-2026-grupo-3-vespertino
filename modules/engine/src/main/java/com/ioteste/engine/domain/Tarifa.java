@@ -1,3 +1,5 @@
 package com.ioteste.engine.domain;
 
-public record Tarifa(TarifaPunta punta) {}
+public record Tarifa(
+    TarifaPunta punta
+) {}

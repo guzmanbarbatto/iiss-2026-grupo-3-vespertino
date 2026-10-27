@@ -1,15 +1,14 @@
 #!/bin/bash
 # ==============================================================================
 # Script: down.sh
-# Descripción: Detiene y elimina por completo los contenedores de la infraestructura,
-#              así como las redes creadas por docker-compose.
+# Descripción: Detiene y elimina por completo los contenedores, redes y
+#              VOLÚMENES persistentes
 # ==============================================================================
 
 echo "=========================================="
 echo "    Deteniendo y limpiando IoTEste        "
 echo "=========================================="
 
-# Navegamos al directorio donde se encuentra el docker-compose.yml
 if [ -d "docker" ]; then
     cd docker
 elif [ -d "../docker" ]; then
@@ -19,9 +18,11 @@ else
     exit 1
 fi
 
-echo "Destruyendo contenedores y redes (docker-compose down)..."
+echo "Destruyendo contenedores, redes y volúmenes..."
+docker compose down -v
 
-docker-compose down
+echo "Purgando volúmenes huérfanos (limpieza profunda)..."
+docker volume prune -f
 
 echo "------------------------------------------"
-echo "✅ Infraestructura destruida correctamente."
+echo "✅ Infraestructura y base de datos destruidas desde cero."

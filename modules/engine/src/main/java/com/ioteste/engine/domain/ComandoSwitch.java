@@ -1,3 +1,5 @@
 package com.ioteste.engine.domain;
 
-public record ComandoSwitch(String accion) {}
+public record ComandoSwitch(
+    String accion
+) {}

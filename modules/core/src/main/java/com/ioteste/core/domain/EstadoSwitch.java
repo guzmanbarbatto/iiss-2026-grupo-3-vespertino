@@ -1,3 +1,6 @@
 package com.ioteste.core.domain;
 
-public enum EstadoSwitch { ON, OFF }
+public enum EstadoSwitch {
+    ON,
+    OFF
+}

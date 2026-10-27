@@ -50,7 +50,18 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
-                <version>3.5.0</version>
+            </plugin>
+
+            <!-- ACTIVACIÓN SPRINT 5: JaCoCo para reporte de cobertura (>= 85%) -->
+            <plugin>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
+            </plugin>
+
+            <!-- ACTIVACIÓN SPRINT 5: Checkstyle para Estándares de Codificación -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-checkstyle-plugin</artifactId>
             </plugin>
         </plugins>
     </build>

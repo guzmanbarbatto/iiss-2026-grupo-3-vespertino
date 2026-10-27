@@ -1,17 +1,23 @@
 #!/bin/bash
+# ==============================================================================
+# Script: up.sh
+# Descripción: Levanta la infraestructura de EcoWarm desde cero.
+# ==============================================================================
 
-echo "Levantando infraestructura EcoWarm"
+echo "=========================================="
+echo "    Levantando infraestructura EcoWarm    "
+echo "=========================================="
 
 if [ -d "docker" ]; then
-cd docker
+    cd docker
 elif [ -d "../docker" ]; then
-cd ../docker
+    cd ../docker
 else
-echo "Error: No se pudo encontrar el directorio 'docker'."
-exit 1
+    echo "Error: No se pudo encontrar el directorio 'docker'."
+    exit 1
 fi
 
 docker compose up -d --build
 
-echo "Infraestructura operativa."
-echo "Ejecuta: docker logs -f ecowarm_engine"
+echo "------------------------------------------"
+echo "✅ Infraestructura operativa."

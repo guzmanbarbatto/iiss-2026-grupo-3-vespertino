@@ -6,6 +6,7 @@ import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
@@ -22,9 +23,9 @@ public class SimuladorRegistroService {
     @Value("${simulador.api.key:}") 
     private String simuladorApiKey;
 
-    // Estos son nuestros datos de identificación en la red de Docker
-    private final String baseUrl = "http://localhost:8080";
-    private final String etiqueta = "control-grupo-3";
+    // Estos son nuestros datos de identificación en la red de Docker (Constantes estáticas para Checkstyle)
+    private static final String BASE_URL = "http://localhost:8080";
+    private static final String ETIQUETA = "control-grupo-3";
 
     @EventListener(ApplicationReadyEvent.class)
     public void registrarEnSegundoPlano() {
@@ -33,15 +34,20 @@ public class SimuladorRegistroService {
     }
 
     private void intentarRegistro() {
-        RestTemplate restTemplate = new RestTemplate();
+        // Resiliencia con Timeouts para evitar que el hilo quede bloqueado
+        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
+        factory.setConnectTimeout(2000);
+        factory.setReadTimeout(2000);
+        RestTemplate restTemplate = new RestTemplate(factory);
+        
         String endpoint = simuladorUrl + "/controladores";
         
         HttpHeaders headers = new HttpHeaders();
         headers.set("X-API-Key", simuladorApiKey);
         headers.set("Content-Type", "application/json");
         
-        // Le decimos al simulador cómo nos llamamos, dónde estamos y qué clave debe usar para hablarnos
-        AltaControlador payload = new AltaControlador(etiqueta, baseUrl, miApiKey);
+        // Le decimos al simulador cómo nos llamamos, dónde estamos y qué clave debe usar
+        AltaControlador payload = new AltaControlador(ETIQUETA, BASE_URL, miApiKey);
         HttpEntity<AltaControlador> request = new HttpEntity<>(payload, headers);
 
         boolean registrado = false;

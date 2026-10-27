@@ -1,14 +1,23 @@
 package com.ioteste.engine.repository;
 
-import com.ioteste.engine.domain.*;
+import com.ioteste.engine.domain.Habitacion;
+import com.ioteste.engine.domain.InventarioDTO;
+import com.ioteste.engine.domain.Sitio;
+import com.ioteste.engine.domain.Tarifa;
+import com.ioteste.engine.domain.TarifaPunta;
 import org.springframework.stereotype.Repository;
+
 import javax.sql.DataSource;
-import java.sql.*;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
 
 @Repository
 public class SitioRepository {
+
     private final DataSource dataSource;
 
     public SitioRepository(DataSource dataSource) {
@@ -16,9 +25,12 @@ public class SitioRepository {
     }
 
     public void guardarInventario(InventarioDTO inventario) throws SQLException {
-        String deleteSitio = "DELETE FROM sitio"; // Borra en cascada las habitaciones viejas
-        String insertSitio = "INSERT INTO sitio (id, nombre, potencia_contratada_kw, tarifa_desde, tarifa_hasta, tarifa_dias) VALUES (?, ?, ?, ?::time, ?::time, ?)";
-        String insertHab = "INSERT INTO habitacion (id, sitio_id, nombre, temperatura_esperada, potencia_kw, id_termostato, topic_termostato, id_switch, url_switch) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)";
+        // Borra en cascada las habitaciones viejas
+        String deleteSitio = "DELETE FROM sitio";
+        String insertSitio = "INSERT INTO sitio (id, nombre, potencia_contratada_kw, tarifa_desde, tarifa_hasta, tarifa_dias) "
+                           + "VALUES (?, ?, ?, ?::time, ?::time, ?)";
+        String insertHab = "INSERT INTO habitacion (id, sitio_id, nombre, temperatura_esperada, potencia_kw, "
+                         + "id_termostato, topic_termostato, id_switch, url_switch) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
         try (Connection conn = dataSource.getConnection()) {
             conn.setAutoCommit(false); // Inicio de transacción atómica
@@ -52,9 +64,11 @@ public class SitioRepository {
                         stmt.executeUpdate();
                     }
                 }
-                conn.commit(); // Si todo salió bien, guardamos definitivamente
+                // Si todo salió bien, guardamos definitivamente
+                conn.commit(); 
             } catch (SQLException e) {
-                conn.rollback(); // Si algo falló, revertimos
+                // Si algo falló, revertimos
+                conn.rollback(); 
                 throw e;
             }
         }
@@ -69,12 +83,24 @@ public class SitioRepository {
             try (PreparedStatement stmt = conn.prepareStatement(querySitio);
                  ResultSet rs = stmt.executeQuery()) {
                 if (rs.next()) {
-                    TarifaPunta punta = new TarifaPunta(rs.getString("tarifa_desde"), rs.getString("tarifa_hasta"), rs.getString("tarifa_dias"));
-                    sitio = new Sitio(rs.getString("id"), rs.getString("nombre"), rs.getDouble("potencia_contratada_kw"), new Tarifa(punta));
+                    TarifaPunta punta = new TarifaPunta(
+                        rs.getString("tarifa_desde"),
+                        rs.getString("tarifa_hasta"),
+                        rs.getString("tarifa_dias")
+                    );
+                    sitio = new Sitio(
+                        rs.getString("id"),
+                        rs.getString("nombre"),
+                        rs.getDouble("potencia_contratada_kw"),
+                        new Tarifa(punta)
+                    );
                 }
             }
 
-            if (sitio == null) return null; // Retorna null si la tabla está vacía
+            // Retorna null si la tabla está vacía
+            if (sitio == null) {
+                return null;
+            }
 
             List<Habitacion> habitaciones = new ArrayList<>();
             try (PreparedStatement stmt = conn.prepareStatement(queryHab)) {
@@ -82,8 +108,14 @@ public class SitioRepository {
                 try (ResultSet rs = stmt.executeQuery()) {
                     while (rs.next()) {
                         habitaciones.add(new Habitacion(
-                            rs.getString("id"), rs.getString("nombre"), rs.getDouble("temperatura_esperada"), rs.getDouble("potencia_kw"),
-                            rs.getString("id_termostato"), rs.getString("topic_termostato"), rs.getString("id_switch"), rs.getString("url_switch")
+                            rs.getString("id"),
+                            rs.getString("nombre"),
+                            rs.getDouble("temperatura_esperada"),
+                            rs.getDouble("potencia_kw"),
+                            rs.getString("id_termostato"),
+                            rs.getString("topic_termostato"),
+                            rs.getString("id_switch"),
+                            rs.getString("url_switch")
                         ));
                     }
                 }

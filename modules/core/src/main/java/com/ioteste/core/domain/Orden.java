@@ -1,4 +1,7 @@
 package com.ioteste.core.domain;
 
-// Representa la Orden del diagrama
-public record Orden(String idHabitacion, AccionSwitch accion) {}
+// Representa la Orden de encendido o apagado para el switch
+public record Orden(
+    String idHabitacion,
+    AccionSwitch accion
+) { }

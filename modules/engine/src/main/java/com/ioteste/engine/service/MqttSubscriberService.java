@@ -2,7 +2,12 @@ package com.ioteste.engine.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ioteste.engine.domain.MensajeTermostato;
-import org.eclipse.paho.client.mqttv3.*;
+import org.eclipse.paho.client.mqttv3.IMqttDeliveryToken;
+import org.eclipse.paho.client.mqttv3.MqttCallback;
+import org.eclipse.paho.client.mqttv3.MqttClient;
+import org.eclipse.paho.client.mqttv3.MqttConnectOptions;
+import org.eclipse.paho.client.mqttv3.MqttException;
+import org.eclipse.paho.client.mqttv3.MqttMessage;
 import org.eclipse.paho.client.mqttv3.persist.MemoryPersistence;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
@@ -46,10 +51,8 @@ public class MqttSubscriberService implements MqttCallback {
 
                     client.setCallback(this);
                     client.connect(options);
-
-                    // Suscripción explícita
-                    client.subscribe("ht-room1/status/temperature:0", 1);
-                    client.subscribe("ht-room2/status/temperature:0", 1);
+                    // Comodín MQTT válido para todo el primer nivel jerárquico
+                    client.subscribe("+/status/temperature:0", 1);
 
                     System.out.println("¡Conectado al broker MQTT y escuchando temperaturas!");
                     conectado = true;
@@ -86,7 +89,8 @@ public class MqttSubscriberService implements MqttCallback {
                 }
 
                 if (idHabitacion != null) {
-                    String insertTemp = "INSERT INTO historico_temperatura (habitacion_id, fecha_hora, temperatura_c) VALUES (?, ?, ?)";
+                    String insertTemp = "INSERT INTO historico_temperatura (habitacion_id, fecha_hora, temperatura_c) "
+                                      + "VALUES (?, ?, ?)";
                     try (PreparedStatement stmtInsert = conn.prepareStatement(insertTemp)) {
                         stmtInsert.setString(1, idHabitacion);
                         stmtInsert.setTimestamp(2, new Timestamp((long) (mensaje.ts() * 1000)));
