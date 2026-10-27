@@ -1,66 +1,84 @@
-# EcoWarm - Sistema de Domótica Inteligente 🌡️ (Iteración 4)
+# EcoWarm - Controlador Domótico (Iteración 5)
 
-EcoWarm es un sistema backend de control domótico diseñado para gestionar la calefacción de hogares, optimizando el consumo energético en base a la temperatura ambiente y las restricciones de la Tarifa Punta eléctrica.
-
-Esta versión (Iteración 4) implementa una **Arquitectura Multi-Módulo (Hexagonal)**, separa el dominio puro (TDD) de la infraestructura, y cumple con el contrato OpenAPI v2.0 establecido por la cátedra para la interoperabilidad.
-
-## 🏗️ Arquitectura Multi-Módulo
-
-El proyecto está dividido en dos módulos Maven principales:
-* **`core`**: Cerebro matemático del sistema. Escrito en Java puro, sin frameworks. Contiene el modelo de dominio y la evaluación de reglas tarifarias.
-* **`engine`**: Adaptador de infraestructura (Spring Boot). Expone la API REST segura, se suscribe a sensores vía MQTT (Eclipse Paho) y persiste el estado en PostgreSQL.
+Sistema de control inteligente de calefacción basado en IoT, desarrollado por el **Grupo 3**. Este proyecto implementa una arquitectura modular separando la lógica de negocio pura (`core`) de la infraestructura y comunicaciones (`engine`), garantizando resiliencia, alta tolerancia a fallos y un estricto control de calidad.
 
 ## 🚀 Requisitos Previos
 
-* **Docker y Docker Compose** instalados (para la infraestructura de BD y Broker).
-* **Simulador Oficial de la Cátedra** (provisto externamente).
-* Java 25 y Maven 3.9 (opcional si se utiliza el script de construcción por Docker).
+Para ejecutar la infraestructura local del proyecto, asegúrese de contar con:
 
-## 🛠️ Cómo compilar y correr el sistema
+* **Docker y Docker Compose** (Sintaxis moderna `docker compose` sin guion).
 
-Todo el ciclo de vida de la aplicación está automatizado en la carpeta `/scripts`.
+* **Git Bash** o terminal compatible con scripts `.sh` (Para usuarios de Windows).
 
-1. **Construir el sistema y correr tests:**
-   Desde la raíz del proyecto, ejecuta:
-   ```bash
-   ./scripts/build.sh
-   ```
-   *Nota: Este paso descarga las dependencias, ejecuta los tests unitarios del `core` y construye la imagen Docker del `engine`.*
+* **Java 25** y **Maven** (Solo requerido para desarrollo local y ejecución de tests manuales, el despliegue está completamente dockerizado).
 
-2. **Levantar la infraestructura:**
-   ```bash
-   ./scripts/up.sh
-   ```
-   Esto levantará en segundo plano:
-   * **PostgreSQL:** Puerto `5432`
-   * **Mosquitto (MQTT):** Puerto `1883`
-   * **Engine (API REST):** Puerto `8080`
+## 🔐 Configuración de Seguridad (.env)
 
-3. **Apagar la infraestructura:**
-   ```bash
-   ./scripts/down.sh
-   ```
+A partir de la Iteración 5, todas las credenciales y URLs han sido removidas del código fuente. Antes de levantar la infraestructura, es **obligatorio** crear un archivo `.env` dentro de la carpeta `docker/` con las siguientes variables:
 
-## 🔌 Integración con el Simulador (Iteración 4)
-
-El sistema está configurado para integrarse automáticamente con el simulador externo proporcionado.
-
-### Pasos de integración:
-1. Asegúrate de levantar el Simulador en tu máquina host antes (o inmediatamente después) de levantar EcoWarm. El simulador debe escuchar en el puerto **`9090`**.
-2. EcoWarm utilizará la URL `http://host.docker.internal:9090` para comunicarse con el simulador desde adentro de su contenedor Docker.
-3. El `Engine` enviará automáticamente los comandos `ON`/`OFF` a los relés mediante peticiones seguras utilizando el token definido en la variable de entorno `SIMULADOR_API_KEY`.
-
-### Seguridad (API Keys)
-Todas las peticiones a la API REST de nuestro `engine` (puerto `8080`) están protegidas. Para interactuar con nuestro controlador, se debe enviar el siguiente Header HTTP:
-* **Header:** `X-API-Key`
-* **Valor por defecto:** `clave-secreta-grupo-3` (Configurable en el `docker-compose.yml`).
-
-## 🧪 Pruebas Unitarias (TDD)
-
-Las reglas de negocio estrictas de encendido y apagado están cubiertas al 100% por pruebas unitarias de caja negra, validando límites de tiempo y potencia.
-
-Para correr las pruebas manualmente sin levantar contenedores, ejecuta:
-```bash
-mvn test -pl modules/core
 ```
-Ver detalles del diseño de pruebas en: `/docs/tests/criterio-tests.md`.
+DB_USER
+DB_PASS
+DB_NAME
+DB_URL
+MQTT_BROKER_URL
+SIMULADOR_URL
+APP_API_KEY
+SIMULADOR_API_KEY
+
+```
+
+## 🏗️ Despliegue de la Infraestructura
+
+El proyecto incluye scripts automatizados en la carpeta `/scripts` que se encargan de aprovisionar la base de datos PostgreSQL, el motor y las redes, limpiando siempre el estado anterior para evitar conflictos.
+
+1. **Levantar el sistema desde cero:**
+   Abra su terminal en la raíz del proyecto y ejecute:
+
+   ```
+   bash scripts/up.sh
+   
+   ```
+
+   *Este comando construirá la imagen del motor saltando los tests para un despliegue rápido y levantará todos los contenedores.*
+
+2. **Detener y limpiar la infraestructura:**
+   Para apagar el sistema y **purgar los volúmenes** de la base de datos (garantizando un reinicio limpio en la próxima ejecución):
+
+   ```
+   bash scripts/down.sh
+   
+   ```
+
+## ⏱️ Soporte de Tiempo Acelerado (Sprint 5)
+
+El motor está diseñado para soportar el mecanismo de tiempo acelerado provisto por la nueva versión del simulador. Al inicio del ciclo, el controlador lee dinámicamente el **factor de aceleración** enviado por la API del simulador y ajusta su reloj interno.
+Esto permite que el sistema evalúe las reglas de negocio y los horarios punta (ej. 17:00 a 23:00) sincronizado a la velocidad de la simulación (ej. 60x), independientemente del tiempo real del servidor.
+
+## 🛡️ Resiliencia y Tolerancia a Fallos
+
+El sistema implementa un patrón **Fail-Safe** riguroso:
+
+* Si la comunicación REST con el simulador falla o un termostato deja de emitir datos MQTT, el error es aislado.
+
+* El controlador detiene la calefacción de la habitación afectada por seguridad, pero **el ciclo general del motor continúa operando** para el resto de la casa sin colapsar.
+
+## 🧪 Calidad y Testing
+
+* **Tests de Integración:** La suite de pruebas (`EngineIntegrationTest`) valida escenarios de limitación de carga, escenarios sin límites, y los casos borde exigidos (caída del servidor MQTT, pérdida de mensajes y falla REST).
+
+* **Cobertura (JaCoCo):** El módulo `core` posee un nivel de cobertura de pruebas superior al **85%**. El reporte HTML interactivo se encuentra disponible en `/docs/calidad/cobertura/index.html`.
+
+* **Estándares de Codificación:** Las reglas de nomenclatura, formato y buenas prácticas adoptadas por el equipo están documentadas en `/docs/calidad/estandares-codificacion.md`.
+
+## 📂 Estructura del Proyecto
+
+* `/docs/`: Documentación de arquitectura (Vistas 4+1) y evidencias de calidad.
+
+* `/docker/`: Archivos de configuración de contenedores, Dockerfile y `.env`.
+
+* `/modules/core/`: Lógica de negocio, reglas de dominio y tests unitarios.
+
+* `/modules/engine/`: Ciclo de control, integración MQTT/REST, resiliencia y tests de integración.
+
+* `/scripts/`: Automatización de despliegue (`up.sh`, `down.sh`, `build.sh`, `tiempo-acelerado`).
