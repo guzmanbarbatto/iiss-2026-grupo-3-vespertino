@@ -1,8 +1,0 @@
-GROUP,PACKAGE,CLASS,INSTRUCTION_MISSED,INSTRUCTION_COVERED,BRANCH_MISSED,BRANCH_COVERED,LINE_MISSED,LINE_COVERED,COMPLEXITY_MISSED,COMPLEXITY_COVERED,METHOD_MISSED,METHOD_COVERED
-core,com.ioteste.core.service,EvaluadorCore,0,156,1,27,0,28,1,16,0,3
-core,com.ioteste.core.domain,AccionSwitch,0,15,0,0,0,3,0,1,0,1
-core,com.ioteste.core.domain,TarifaPunta,0,12,0,0,0,1,0,1,0,1
-core,com.ioteste.core.domain,Salida,0,6,0,0,0,1,0,1,0,1
-core,com.ioteste.core.domain,EstadoSwitch,0,15,0,0,0,3,0,1,0,1
-core,com.ioteste.core.domain,Orden,0,9,0,0,0,1,0,1,0,1
-core,com.ioteste.core.domain,HabitacionDTO,0,18,0,0,0,1,0,1,0,1

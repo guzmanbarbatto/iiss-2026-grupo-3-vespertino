@@ -1,0 +1,5 @@
+# Ignorar compilados de Maven en cualquier submódulo
+**/target/
+
+# Ignorar variables de entorno secretas
+.env

@@ -1,4 +1,0 @@
--------------------------------------------------------------------------------
-Test set: com.ioteste.core.service.EvaluadorCoreTest
--------------------------------------------------------------------------------
-Tests run: 11, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.323 s -- in com.ioteste.core.service.EvaluadorCoreTest

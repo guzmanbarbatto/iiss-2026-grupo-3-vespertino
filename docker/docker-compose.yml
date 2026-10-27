@@ -1,12 +1,13 @@
 services:
-  # Aprovisionamiento de PostgreSQL para guardar la configuración persistente.
   postgres-db:
     image: postgres:15-alpine
     container_name: iot_postgres_db
+    env_file:
+      - .env
     environment:
-      POSTGRES_USER: ecowarm_user
-      POSTGRES_PASSWORD: ecowarmpass
-      POSTGRES_DB: ecowarm
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASS}
+      POSTGRES_DB: ${DB_NAME}
     ports:
       - "5432:5432"
     volumes:
@@ -15,7 +16,7 @@ services:
     networks:
       - iot-network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ecowarm_user -d ecowarm"]
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -31,14 +32,8 @@ services:
     depends_on:
       postgres-db:
         condition: service_healthy
-    environment:
-      - DB_URL=jdbc:postgresql://postgres-db:5432/ecowarm
-      - DB_USER=ecowarm_user
-      - DB_PASS=ecowarmpass
-      - MQTT_BROKER_URL=tcp://host.docker.internal:1883
-      - SIMULADOR_URL=http://host.docker.internal:9090
-      - APP_API_KEY=clave-secreta-grupo-3
-      - SIMULADOR_API_KEY=clave-simulador-catedra 
+    env_file:
+      - .env
     networks:
       - iot-network
 
