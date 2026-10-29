@@ -25,22 +25,39 @@ public class SitioRepository {
     }
 
     public void guardarInventario(InventarioDTO inventario) throws SQLException {
-        // Borra en cascada las habitaciones viejas
-        String deleteSitio = "DELETE FROM sitio";
-        String insertSitio = "INSERT INTO sitio (id, nombre, potencia_contratada_kw, tarifa_desde, tarifa_hasta, tarifa_dias) "
-                           + "VALUES (?, ?, ?, ?::time, ?::time, ?)";
-        String insertHab = "INSERT INTO habitacion (id, sitio_id, nombre, temperatura_esperada, potencia_kw, "
-                         + "id_termostato, topic_termostato, id_switch, url_switch) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)";
+        // Reemplazo por upsert en lugar de borrar todo: un DELETE FROM sitio borraba en cascada
+        // las habitaciones y con ellas el histórico de temperaturas, dejando al motor sin lecturas.
+        // Ahora solo se eliminan los sitios y habitaciones que ya no forman parte del inventario.
+        String deleteOtrosSitios = "DELETE FROM sitio WHERE id <> ?";
+        String upsertSitio = "INSERT INTO sitio (id, nombre, potencia_contratada_kw, tarifa_desde, tarifa_hasta, tarifa_dias) "
+                           + "VALUES (?, ?, ?, ?::time, ?::time, ?) "
+                           + "ON CONFLICT (id) DO UPDATE SET nombre = EXCLUDED.nombre, "
+                           + "potencia_contratada_kw = EXCLUDED.potencia_contratada_kw, "
+                           + "tarifa_desde = EXCLUDED.tarifa_desde, tarifa_hasta = EXCLUDED.tarifa_hasta, "
+                           + "tarifa_dias = EXCLUDED.tarifa_dias";
+        String deleteHabsRemovidas = "DELETE FROM habitacion WHERE sitio_id = ? AND NOT (id = ANY (?))";
+        String upsertHab = "INSERT INTO habitacion (id, sitio_id, nombre, temperatura_esperada, potencia_kw, "
+                         + "id_termostato, topic_termostato, id_switch, url_switch) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                         + "ON CONFLICT (id) DO UPDATE SET sitio_id = EXCLUDED.sitio_id, nombre = EXCLUDED.nombre, "
+                         + "temperatura_esperada = EXCLUDED.temperatura_esperada, potencia_kw = EXCLUDED.potencia_kw, "
+                         + "id_termostato = EXCLUDED.id_termostato, topic_termostato = EXCLUDED.topic_termostato, "
+                         + "id_switch = EXCLUDED.id_switch, url_switch = EXCLUDED.url_switch";
 
         try (Connection conn = dataSource.getConnection()) {
             conn.setAutoCommit(false); // Inicio de transacción atómica
             try {
-                try (PreparedStatement stmt = conn.prepareStatement(deleteSitio)) {
+                Sitio s = inventario.sitio();
+                List<Habitacion> habitacionesNuevas = inventario.habitaciones() == null
+                        ? List.of() : inventario.habitaciones();
+
+                // 1. Solo puede haber un sitio: se eliminan los demás (y en cascada sus habitaciones)
+                try (PreparedStatement stmt = conn.prepareStatement(deleteOtrosSitios)) {
+                    stmt.setString(1, s.id());
                     stmt.executeUpdate();
                 }
 
-                try (PreparedStatement stmt = conn.prepareStatement(insertSitio)) {
-                    Sitio s = inventario.sitio();
+                // 2. Se actualiza o inserta el sitio
+                try (PreparedStatement stmt = conn.prepareStatement(upsertSitio)) {
                     stmt.setString(1, s.id());
                     stmt.setString(2, s.nombre());
                     stmt.setDouble(3, s.potenciaContratadaKW());
@@ -50,10 +67,19 @@ public class SitioRepository {
                     stmt.executeUpdate();
                 }
 
-                try (PreparedStatement stmt = conn.prepareStatement(insertHab)) {
-                    for (Habitacion h : inventario.habitaciones()) {
+                // 3. Se eliminan las habitaciones del sitio que ya no vienen en el inventario
+                try (PreparedStatement stmt = conn.prepareStatement(deleteHabsRemovidas)) {
+                    Object[] idsNuevos = habitacionesNuevas.stream().map(Habitacion::id).toArray();
+                    stmt.setString(1, s.id());
+                    stmt.setArray(2, conn.createArrayOf("varchar", idsNuevos));
+                    stmt.executeUpdate();
+                }
+
+                // 4. Se insertan o actualizan las habitaciones vigentes sin tocar su histórico
+                try (PreparedStatement stmt = conn.prepareStatement(upsertHab)) {
+                    for (Habitacion h : habitacionesNuevas) {
                         stmt.setString(1, h.id());
-                        stmt.setString(2, inventario.sitio().id());
+                        stmt.setString(2, s.id());
                         stmt.setString(3, h.nombre());
                         stmt.setDouble(4, h.temperaturaEsperada());
                         stmt.setDouble(5, h.potenciaKW());
@@ -65,10 +91,10 @@ public class SitioRepository {
                     }
                 }
                 // Si todo salió bien, guardamos definitivamente
-                conn.commit(); 
+                conn.commit();
             } catch (SQLException e) {
                 // Si algo falló, revertimos
-                conn.rollback(); 
+                conn.rollback();
                 throw e;
             }
         }
@@ -77,7 +103,7 @@ public class SitioRepository {
     public InventarioDTO obtenerInventario() {
         String querySitio = "SELECT * FROM sitio LIMIT 1";
         String queryHab = "SELECT * FROM habitacion WHERE sitio_id = ?";
-        
+
         try (Connection conn = dataSource.getConnection()) {
             Sitio sitio = null;
             try (PreparedStatement stmt = conn.prepareStatement(querySitio);

@@ -30,7 +30,9 @@ import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ScheduledFuture;
 
 @Service
@@ -44,7 +46,7 @@ public class EvaluadorJobService {
 
     private ScheduledFuture<?> tareaProgramada;
     private Double factorAceleracion = 1.0;
-    
+
     private Instant inicioReal;
     private ZonedDateTime inicioSimulado;
 
@@ -53,6 +55,9 @@ public class EvaluadorJobService {
 
     @Value("${simulador.api.key:}")
     private String simuladorApiKey;
+
+    // Caché en memoria para evitar saturar la red
+    private final Map<String, EstadoSwitch> cacheSwitches = new ConcurrentHashMap<>();
 
     public EvaluadorJobService(SwitchClientService switchClientService, DataSource dataSource) {
         this.switchClientService = switchClientService;
@@ -73,9 +78,11 @@ public class EvaluadorJobService {
     public synchronized void iniciarMotor(Double factor, String fechaHora) {
         this.factorAceleracion = (factor != null && factor > 0) ? factor : 1.0;
         this.inicioReal = Instant.now();
-        
+        this.cacheSwitches.clear();
+
         try {
-            this.inicioSimulado = ZonedDateTime.parse(fechaHora);
+            this.inicioSimulado = ZonedDateTime.parse(fechaHora)
+                    .withZoneSameInstant(ZoneId.of("America/Montevideo"));
         } catch (Exception e) {
             this.inicioSimulado = ZonedDateTime.now(ZoneId.of("America/Montevideo"));
         }
@@ -99,9 +106,12 @@ public class EvaluadorJobService {
         if (tareaProgramada != null && !tareaProgramada.isCancelled()) {
             tareaProgramada.cancel(false);
         }
+        this.inicioReal = null;
+        this.inicioSimulado = null;
+        this.cacheSwitches.clear();
     }
 
-    private ZonedDateTime obtenerRelojSimulado() {
+    public ZonedDateTime obtenerRelojSimulado() {
         if (inicioReal == null || inicioSimulado == null) {
             return ZonedDateTime.now(ZoneId.of("America/Montevideo"));
         }
@@ -115,7 +125,7 @@ public class EvaluadorJobService {
         System.out.println("⏳ Ciclo Core | Hora simulada: " + ahoraSimulado);
 
         try (Connection conn = dataSource.getConnection()) {
-            
+
             // 1. OBTENER DATOS DEL SITIO Y LA TARIFA
             double potenciaContratada = 0.0;
             LocalTime tarifaDesde = LocalTime.of(0, 0);
@@ -123,15 +133,15 @@ public class EvaluadorJobService {
             Set<DayOfWeek> diasTarifa = new HashSet<>();
 
             String querySitio = "SELECT potencia_contratada_kw, tarifa_desde, tarifa_hasta, tarifa_dias FROM sitio LIMIT 1";
-                              
-            try (PreparedStatement stmt = conn.prepareStatement(querySitio); 
+
+            try (PreparedStatement stmt = conn.prepareStatement(querySitio);
                  ResultSet rs = stmt.executeQuery()) {
                 if (rs.next()) {
                     potenciaContratada = rs.getDouble("potencia_contratada_kw");
                     tarifaDesde = rs.getTime("tarifa_desde").toLocalTime();
                     tarifaHasta = rs.getTime("tarifa_hasta").toLocalTime();
                     String diasStr = rs.getString("tarifa_dias");
-                    
+
                     if (diasStr != null && !diasStr.isEmpty()) {
                         for (String dia : diasStr.split(",")) {
                             String d = dia.trim().toUpperCase();
@@ -170,9 +180,9 @@ public class EvaluadorJobService {
 
             TarifaPunta tarifa = new TarifaPunta(tarifaDesde, tarifaHasta, diasTarifa);
 
-            // 2. OBTENER HABITACIONES Y ESTADOS
+            // 2. OBTENER HABITACIONES Y ESTADOS (Fail-Safe + Caché)
             List<HabitacionDTO> habitaciones = new ArrayList<>();
-            String queryHabitaciones = 
+            String queryHabitaciones =
                 "SELECT h.id, h.temperatura_esperada, h.potencia_kw, h.id_switch, "
                 + "(SELECT temperatura_c FROM historico_temperatura ht "
                 + "WHERE ht.habitacion_id = h.id ORDER BY fecha_hora DESC LIMIT 1) as temp_actual, "
@@ -180,75 +190,86 @@ public class EvaluadorJobService {
                 + "WHERE ht.habitacion_id = h.id ORDER BY fecha_hora DESC LIMIT 1) as ultima_fecha "
                 + "FROM habitacion h";
 
-            try (PreparedStatement stmt = conn.prepareStatement(queryHabitaciones); 
+            try (PreparedStatement stmt = conn.prepareStatement(queryHabitaciones);
                  ResultSet rs = stmt.executeQuery()) {
                 while (rs.next()) {
                     String idHab = rs.getString("id");
                     double tempEsperada = rs.getDouble("temperatura_esperada");
                     double potenciaKw = rs.getDouble("potencia_kw");
                     String idSwitch = rs.getString("id_switch");
-                    
+
+                    // Fail-Safe: si no hay lecturas o la lectura está vencida, forzamos 99.0C para apagar
                     double tempActual = 99.0;
                     Object tempObj = rs.getObject("temp_actual");
                     Timestamp ultimaFecha = rs.getTimestamp("ultima_fecha");
 
                     if (tempObj != null && ultimaFecha != null) {
-                        long segundosSimulados;
-                        
-                        // Traducción matemática perfecta del tiempo real del DB a la dimensión del simulador
+                        // Diferencia en tiempo simulado (el ts del simulador viene en el reloj virtual)
+                        long diffSimulado = Math.abs(
+                                Duration.between(ultimaFecha.toInstant(), ahoraSimulado.toInstant()).getSeconds());
+
+                        // Diferencia en tiempo real escalado (para lecturas insertadas con reloj real)
+                        long diffRealEscalado = diffSimulado;
                         if (inicioReal != null && inicioSimulado != null) {
                             long millisDesdeInicio = Duration.between(inicioReal, ultimaFecha.toInstant()).toMillis();
                             ZonedDateTime fechaSimuladaDelRegistro = inicioSimulado.plus(
                                     (long) (millisDesdeInicio * factorAceleracion), ChronoUnit.MILLIS);
-                            segundosSimulados = Duration.between(fechaSimuladaDelRegistro, ahoraSimulado).getSeconds();
-                        } else {
-                            // Caso Test: sin iniciarMotor(), usamos el tiempo puro
-                            segundosSimulados = Duration.between(ultimaFecha.toInstant(), ahoraSimulado.toInstant()).getSeconds();
+                            diffRealEscalado = Math.abs(
+                                    Duration.between(fechaSimuladaDelRegistro, ahoraSimulado).getSeconds());
                         }
 
-                        if (Math.abs(segundosSimulados) <= 600) {
+                        long segundosInactivo = Math.min(diffSimulado, diffRealEscalado);
+                        if (segundosInactivo <= 600) {
                             tempActual = rs.getDouble("temp_actual");
                         } else {
-                            System.err.println("⚠️ Termostato [" + idHab + "] inactivo. Forzando temperatura crítica (99.0C).");
+                            System.err.println("⚠️ Termostato [" + idHab
+                                    + "] inactivo. Forzando temperatura crítica (99.0C).");
                             tempActual = 99.0;
                         }
                     }
 
-                    EstadoSwitch estadoActual = EstadoSwitch.OFF; 
-                    try {
-                        HttpHeaders headers = new HttpHeaders();
-                        headers.set("X-API-Key", simuladorApiKey);
-                        HttpEntity<Void> getEntity = new HttpEntity<>(headers);
-                        
-                        String urlEstado = simuladorUrlBase + "/switches/" + idSwitch;
-                        String respuesta = restTemplate.exchange(urlEstado, HttpMethod.GET, getEntity, String.class).getBody();
-                        
-                        if (respuesta != null && respuesta.contains("ON") && !respuesta.contains("DESCONOCIDO")) {
-                            estadoActual = EstadoSwitch.ON;
+                    // Se consulta HTTP solo si el switch NO está en el caché
+                    EstadoSwitch estadoActual = cacheSwitches.computeIfAbsent(idSwitch, key -> {
+                        try {
+                            HttpHeaders headers = new HttpHeaders();
+                            headers.set("X-API-Key", simuladorApiKey);
+                            HttpEntity<Void> getEntity = new HttpEntity<>(headers);
+
+                            String urlEstado = simuladorUrlBase + "/switches/" + key;
+                            String respuesta = restTemplate.exchange(
+                                    urlEstado, HttpMethod.GET, getEntity, String.class).getBody();
+
+                            if (respuesta != null && respuesta.contains("ON") && !respuesta.contains("DESCONOCIDO")) {
+                                return EstadoSwitch.ON;
+                            }
+                        } catch (Exception e) {
+                            return EstadoSwitch.ON;
                         }
-                    } catch (Exception e) {
-                        estadoActual = EstadoSwitch.ON; 
-                    }
+                        return EstadoSwitch.OFF;
+                    });
 
                     habitaciones.add(new HabitacionDTO(idHab, tempEsperada, tempActual, potenciaKw, estadoActual));
                 }
             }
 
             System.out.println("🔍 RADIOGRAFÍA DEL MOTOR:");
-            System.out.println("   Hora motor: " + ahoraSimulado.toLocalTime() + " | Punta: " + tarifaDesde + "-" + tarifaHasta + " | Potencia DB: " + potenciaContratada + "kW");
-            for(HabitacionDTO h : habitaciones) {
-                System.out.println("   -> Hab: " + h.id() + " | Temp Actual: " + h.temperaturaActual() + "C | Esperada: " + h.temperaturaEsperada() + "C | Switch: " + h.estadoActual());
+            System.out.println("   Hora motor: " + ahoraSimulado.toLocalTime()
+                    + " | Punta: " + tarifaDesde + "-" + tarifaHasta
+                    + " | Potencia DB: " + potenciaContratada + "kW");
+            for (HabitacionDTO h : habitaciones) {
+                System.out.println("   -> Hab: " + h.id() + " | Temp Actual: " + h.temperaturaActual()
+                        + "C | Esperada: " + h.temperaturaEsperada() + "C | Switch: " + h.estadoActual());
             }
 
             // 3. LLAMAR AL EVALUADOR CORE
             Salida resultado = evaluadorCore.evaluarEstado(ahoraSimulado, potenciaContratada, tarifa, habitaciones);
 
-            // 4. DISPARAR LAS ÓRDENES
+            // 4. DISPARAR LAS ÓRDENES Y ACTUALIZAR CACHÉ SOLO SI EL POST FUE EXITOSO
             for (Orden orden : resultado.ordenes()) {
                 try {
                     String accionStr = orden.accion().name();
                     String idSwitchFinal = null;
-                    
+
                     String querySwitch = "SELECT id_switch FROM habitacion WHERE id = ?";
                     try (PreparedStatement stmt = conn.prepareStatement(querySwitch)) {
                         stmt.setString(1, orden.idHabitacion());
@@ -260,10 +281,18 @@ public class EvaluadorJobService {
                     }
 
                     if (idSwitchFinal != null) {
-                        switchClientService.comandarSwitch(simuladorUrlBase, idSwitchFinal, accionStr);
+                        boolean exito = switchClientService.comandarSwitch(
+                                simuladorUrlBase, idSwitchFinal, accionStr);
+                        if (exito) {
+                            EstadoSwitch nuevoEstado = (accionStr.equals("ON") || accionStr.equals("ENCENDER"))
+                                    ? EstadoSwitch.ON : EstadoSwitch.OFF;
+                            cacheSwitches.put(idSwitchFinal, nuevoEstado);
+                        } else {
+                            cacheSwitches.remove(idSwitchFinal);
+                        }
                     }
                 } catch (Exception e) {
-                    System.err.println("⚠️ Tolerancia a fallos: Ignorando error al comandar " 
+                    System.err.println("⚠️ Tolerancia a fallos: Ignorando error al comandar "
                             + orden.idHabitacion() + ". Continuando con el resto... (" + e.getMessage() + ")");
                 }
             }

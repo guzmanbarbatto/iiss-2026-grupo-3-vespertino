@@ -25,22 +25,11 @@ public class SwitchClientService {
         this.restTemplate = new RestTemplate(factory);
     }
 
-    public void comandarSwitch(String urlSwitch, String idSwitch, String accion) {
+    public boolean comandarSwitch(String urlSwitch, String idSwitch, String accion) {
         HttpHeaders headers = new HttpHeaders();
         headers.set("X-API-Key", simuladorApiKey);
         headers.set("Content-Type", "application/json");
 
-        // 1. PUNTO 4: Consultar el estado actual del switch antes de comandarlo
-        String urlEstado = urlSwitch + "/switches/" + idSwitch;
-        try {
-            HttpEntity<Void> getEntity = new HttpEntity<>(headers);
-            restTemplate.exchange(urlEstado, HttpMethod.GET, getEntity, String.class);
-        } catch (Exception e) {
-            System.err.println("⚠️ Tolerancia a fallos: Ignorando caída GET en switch " 
-                    + idSwitch + " - " + e.getMessage());
-        }
-
-        // 2. PUNTO 3: Enviar el comando ON / OFF al switch
         String urlComandos = urlSwitch + "/switches/" + idSwitch + "/comandos";
         ComandoSwitch body = new ComandoSwitch(accion);
         HttpEntity<ComandoSwitch> postEntity = new HttpEntity<>(body, headers);
@@ -48,9 +37,11 @@ public class SwitchClientService {
         try {
             restTemplate.exchange(urlComandos, HttpMethod.POST, postEntity, String.class);
             System.out.println("✅ Comando [" + accion + "] enviado exitosamente al switch: " + idSwitch);
+            return true;
         } catch (Exception e) {
-            System.err.println("❌ Tolerancia a fallos: Bloqueando caída POST en switch " 
+            System.err.println("❌ Tolerancia a fallos: Bloqueando caída POST en switch "
                     + idSwitch + " - " + e.getMessage());
+            return false;
         }
     }
 }

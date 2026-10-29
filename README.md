@@ -1,6 +1,6 @@
 # EcoWarm - Controlador Domótico (Iteración 5)
 
-Sistema de control inteligente de calefacción basado en IoT, desarrollado por el **Grupo 3**. Este proyecto implementa una arquitectura modular separando la lógica de negocio pura (`core`) de la infraestructura y comunicaciones (`engine`), garantizando resiliencia, alta tolerancia a fallos y un estricto control de calidad.
+Sistema de control inteligente de calefacción basado en IoT, desarrollado por el **Grupo 3**. Este proyecto implementa una arquitectura modular separando la lógica de negocio pura (`core`), la infraestructura y comunicaciones (`engine`) y un servidor **Model Context Protocol (`mcp`)** para integración con agentes de IA, garantizando resiliencia, alta tolerancia a fallos y un estricto control de calidad.
 
 ## 🚀 Requisitos Previos
 
@@ -30,7 +30,7 @@ SIMULADOR_API_KEY
 
 ## 🏗️ Despliegue de la Infraestructura
 
-El proyecto incluye scripts automatizados en la carpeta `/scripts` que se encargan de aprovisionar la base de datos PostgreSQL, el motor y las redes, limpiando siempre el estado anterior para evitar conflictos.
+El proyecto incluye scripts automatizados en la carpeta `/scripts` que se encargan de aprovisionar la base de datos PostgreSQL, el motor (`:8080`), el servidor MCP (`:8081`) y las redes, limpiando siempre el estado anterior para evitar conflictos.
 
 1. **Levantar el sistema desde cero:**
    Abra su terminal en la raíz del proyecto y ejecute:
@@ -40,7 +40,7 @@ El proyecto incluye scripts automatizados en la carpeta `/scripts` que se encarg
    
    ```
 
-   *Este comando construirá la imagen del motor saltando los tests para un despliegue rápido y levantará todos los contenedores.*
+   *Este comando construirá las imágenes del motor y del servidor MCP y levantará todos los contenedores.*
 
 2. **Detener y limpiar la infraestructura:**
    Para apagar el sistema y **purgar los volúmenes** de la base de datos (garantizando un reinicio limpio en la próxima ejecución):
@@ -63,22 +63,31 @@ El sistema implementa un patrón **Fail-Safe** riguroso:
 
 * El controlador detiene la calefacción de la habitación afectada por seguridad, pero **el ciclo general del motor continúa operando** para el resto de la casa sin colapsar.
 
+## 🤖 Servidor MCP para Agentes de IA (`modules/mcp`)
+
+El proyecto incluye un servidor **Model Context Protocol (MCP)** sobre HTTP + SSE en el puerto `8081` (`/mcp/sse` y `/mcp/message`), desarrollado con **Spring AI 1.0**. Expone **7 tools** (`obtenerSitio`, `consultarEstadoHabitaciones`, `historialTemperaturas`, `obtenerEstadoControl`, `iniciarControl`, `detenerControl` y `accionarSwitch`) que combinan la API REST del `engine`, los switches del simulador y lectura en modo `read-only` de PostgreSQL.
+
+* **Arquitectura 4+1 del Módulo MCP:** [`/docs/mcp/4mas1-mcp.md`](docs/mcp/4mas1-mcp.md)
+* **Evidencia de Pruebas E2E con MCP Inspector y Simulador:** [`/docs/mcp/pruebas-mcp.md`](docs/mcp/pruebas-mcp.md)
+
 ## 🧪 Calidad y Testing
 
-* **Tests de Integración:** La suite de pruebas (`EngineIntegrationTest`) valida escenarios de limitación de carga, escenarios sin límites, y los casos borde exigidos (caída del servidor MQTT, pérdida de mensajes y falla REST).
+* **Tests Unitarios y de Integración:** El proyecto cuenta con **43 tests automatizados** distribuidos en `EvaluadorCoreTest` (13 tests en `core`), `EngineIntegrationTest` (8 tests en `engine`) y la suite del servidor MCP (`EcoWarmToolsTest`, `ClientesHttpTest` y `McpServerContextTest`, con 22 tests en `mcp`).
 
 * **Cobertura (JaCoCo):** El módulo `core` posee un nivel de cobertura de pruebas superior al **85%**. El reporte HTML interactivo se encuentra disponible en `/docs/calidad/cobertura/index.html`.
 
-* **Estándares de Codificación:** Las reglas de nomenclatura, formato y buenas prácticas adoptadas por el equipo están documentadas en `/docs/calidad/estandares-codificacion.md`.
+* **Estándares de Codificación:** Las reglas de nomenclatura, formato y buenas prácticas adoptadas por el equipo están documentadas en `/docs/calidad/estandares_de_codificacion.md`.
 
 ## 📂 Estructura del Proyecto
 
-* `/docs/`: Documentación de arquitectura (Vistas 4+1) y evidencias de calidad.
+* `/docs/`: Documentación de arquitectura (Vistas 4+1), documentación y pruebas del servidor MCP (`/docs/mcp/`) y evidencias de calidad.
 
 * `/docker/`: Archivos de configuración de contenedores, Dockerfile y `.env`.
 
 * `/modules/core/`: Lógica de negocio, reglas de dominio y tests unitarios.
 
 * `/modules/engine/`: Ciclo de control, integración MQTT/REST, resiliencia y tests de integración.
+
+* `/modules/mcp/`: Servidor MCP (Spring AI) con 7 tools para agentes de IA y su suite de pruebas.
 
 * `/scripts/`: Automatización de despliegue (`up.sh`, `down.sh`, `build.sh`, `tiempo-acelerado`).

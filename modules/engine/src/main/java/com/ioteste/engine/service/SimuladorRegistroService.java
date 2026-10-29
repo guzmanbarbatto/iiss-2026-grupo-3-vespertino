@@ -18,13 +18,14 @@ public class SimuladorRegistroService {
 
     @Value("${app.api.key}")
     private String miApiKey;
-    
+
     // Si aún no tenemos la clave, asume vacío
-    @Value("${simulador.api.key:}") 
+    @Value("${simulador.api.key:}")
     private String simuladorApiKey;
 
-    // Estos son nuestros datos de identificación en la red de Docker (Constantes estáticas para Checkstyle)
-    private static final String BASE_URL = "http://localhost:8080";
+    @Value("${controlador.base.url:http://localhost:8080}")
+    private String baseUrl;
+
     private static final String ETIQUETA = "control-grupo-3";
 
     @EventListener(ApplicationReadyEvent.class)
@@ -39,15 +40,15 @@ public class SimuladorRegistroService {
         factory.setConnectTimeout(2000);
         factory.setReadTimeout(2000);
         RestTemplate restTemplate = new RestTemplate(factory);
-        
+
         String endpoint = simuladorUrl + "/controladores";
-        
+
         HttpHeaders headers = new HttpHeaders();
         headers.set("X-API-Key", simuladorApiKey);
         headers.set("Content-Type", "application/json");
-        
+
         // Le decimos al simulador cómo nos llamamos, dónde estamos y qué clave debe usar
-        AltaControlador payload = new AltaControlador(ETIQUETA, BASE_URL, miApiKey);
+        AltaControlador payload = new AltaControlador(ETIQUETA, baseUrl, miApiKey);
         HttpEntity<AltaControlador> request = new HttpEntity<>(payload, headers);
 
         boolean registrado = false;

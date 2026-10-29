@@ -15,13 +15,26 @@ import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.web.client.RestTemplate;
 
 import javax.sql.DataSource;
-import java.sql.*;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.Time;
+import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
 
-import static org.mockito.ArgumentMatchers.*;
-import static org.mockito.Mockito.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
@@ -46,17 +59,25 @@ public class EngineIntegrationTest {
         evaluadorJobService = new EvaluadorJobService(switchClientService, dataSource);
         ReflectionTestUtils.setField(evaluadorJobService, "simuladorUrlBase", "http://mock-url");
         ReflectionTestUtils.setField(evaluadorJobService, "restTemplate", restTemplateMock);
-        
+
         lenient().when(restTemplateMock.exchange(anyString(), eq(HttpMethod.GET), any(), eq(String.class)))
                  .thenReturn(ResponseEntity.ok("OFF"));
+        lenient().when(switchClientService.comandarSwitch(anyString(), anyString(), anyString()))
+                 .thenReturn(true);
 
         lenient().when(dataSource.getConnection()).thenReturn(connection);
-        
+
         lenient().when(connection.prepareStatement(anyString())).thenAnswer(invocation -> {
             String sql = ((String) invocation.getArgument(0)).toLowerCase();
-            if (sql.contains("where id = ?")) return stmtSwitchId; 
-            if (sql.contains("sitio")) return stmtSitio;
-            if (sql.contains("habitacion")) return stmtHabitaciones;
+            if (sql.contains("where id = ?")) {
+                return stmtSwitchId;
+            }
+            if (sql.contains("sitio")) {
+                return stmtSitio;
+            }
+            if (sql.contains("habitacion")) {
+                return stmtHabitaciones;
+            }
             return null;
         });
 
@@ -83,7 +104,7 @@ public class EngineIntegrationTest {
     @Test
     void caso1_ControlTemperatura_SinLimitacion_DebeApagarSiHaceCalor() throws Exception {
         when(rsSitio.getDouble("potencia_contratada_kw")).thenReturn(10.0);
-        
+
         when(rsHabitaciones.next()).thenReturn(true, false);
         when(rsHabitaciones.getString("id")).thenReturn("hab-1");
         when(rsHabitaciones.getDouble("temperatura_esperada")).thenReturn(20.0);
@@ -103,12 +124,12 @@ public class EngineIntegrationTest {
 
     @Test
     void caso2_ControlTemperatura_ConLimitacion_NoDebeEncenderPorFaltaDePotencia() throws Exception {
-        when(rsSitio.getDouble("potencia_contratada_kw")).thenReturn(1.0); 
-        
+        when(rsSitio.getDouble("potencia_contratada_kw")).thenReturn(1.0);
+
         when(rsHabitaciones.next()).thenReturn(true, false);
         when(rsHabitaciones.getString("id")).thenReturn("hab-1");
         when(rsHabitaciones.getDouble("temperatura_esperada")).thenReturn(25.0);
-        when(rsHabitaciones.getDouble("potencia_kw")).thenReturn(2.0); 
+        when(rsHabitaciones.getDouble("potencia_kw")).thenReturn(2.0);
         when(rsHabitaciones.getString("id_switch")).thenReturn("sw-1");
         when(rsHabitaciones.getObject("temp_actual")).thenReturn(15.0);
         when(rsHabitaciones.getDouble("temp_actual")).thenReturn(15.0);
@@ -122,15 +143,17 @@ public class EngineIntegrationTest {
         verify(switchClientService, never()).comandarSwitch(anyString(), eq("sw-1"), eq("ON"));
     }
 
-@Test
-    void caso3_CasosBorde_CaidaREST_Y_TermostatoRoto() throws Exception {
+    @Test
+    void caso3_CasosBorde_CaidaREST_Y_ToleranciaFallo() throws Exception {
         when(rsSitio.getDouble("potencia_contratada_kw")).thenReturn(10.0);
-        
+
         when(rsHabitaciones.next()).thenReturn(true, false);
         when(rsHabitaciones.getString("id")).thenReturn("hab-1");
         when(rsHabitaciones.getDouble("temperatura_esperada")).thenReturn(22.0);
         when(rsHabitaciones.getDouble("potencia_kw")).thenReturn(2.0);
         when(rsHabitaciones.getString("id_switch")).thenReturn("sw-1");
+        // Aunque la última lectura decía 15°C (frío), como tiene 15 minutos de antigüedad (>600s),
+        // el fail-safe fuerza 99.0°C y ordena apagar el switch.
         when(rsHabitaciones.getObject("temp_actual")).thenReturn(15.0);
         when(rsHabitaciones.getDouble("temp_actual")).thenReturn(15.0);
         when(rsHabitaciones.getTimestamp(anyString())).thenReturn(
@@ -142,6 +165,14 @@ public class EngineIntegrationTest {
         doThrow(new RuntimeException("Simulacro Crítico"))
             .when(switchClientService).comandarSwitch(anyString(), anyString(), anyString());
 
+        PreparedStatement stmtSwitch = mock(PreparedStatement.class);
+        ResultSet rsSwitch = mock(ResultSet.class);
+        when(dataSource.getConnection().prepareStatement("SELECT id_switch FROM habitacion WHERE id = ?"))
+                .thenReturn(stmtSwitch);
+        when(stmtSwitch.executeQuery()).thenReturn(rsSwitch);
+        when(rsSwitch.next()).thenReturn(true);
+        when(rsSwitch.getString("id_switch")).thenReturn("sw-1");
+
         evaluadorJobService.ejecutarCicloDeControl();
 
         verify(switchClientService, times(1)).comandarSwitch(anyString(), eq("sw-1"), eq("OFF"));
@@ -150,7 +181,7 @@ public class EngineIntegrationTest {
     @Test
     void caso4_EscenarioComplejo_MultiplesEstadosYSwitchCaido() throws Exception {
         when(rsSitio.getDouble("potencia_contratada_kw")).thenReturn(20.0);
-        
+
         when(rsHabitaciones.next()).thenReturn(true, false);
         when(rsHabitaciones.getString("id")).thenReturn("hab-3");
         when(rsHabitaciones.getDouble("temperatura_esperada")).thenReturn(20.0);
@@ -184,7 +215,7 @@ public class EngineIntegrationTest {
     @Test
     void caso6_Idempotencia_NoEnviarComandosRedundantes() throws Exception {
         when(rsSitio.getDouble("potencia_contratada_kw")).thenReturn(10.0);
-        
+
         when(rsHabitaciones.next()).thenReturn(true, false);
         when(rsHabitaciones.getString("id")).thenReturn("hab-1");
         when(rsHabitaciones.getDouble("temperatura_esperada")).thenReturn(22.0);
@@ -193,7 +224,7 @@ public class EngineIntegrationTest {
         when(rsHabitaciones.getObject("temp_actual")).thenReturn(24.0);
         when(rsHabitaciones.getDouble("temp_actual")).thenReturn(24.0);
         when(rsHabitaciones.getTimestamp(anyString())).thenReturn(Timestamp.from(Instant.now()));
-        
+
         evaluadorJobService.ejecutarCicloDeControl();
 
         verify(switchClientService, never()).comandarSwitch(anyString(), eq("sw-1"), eq("OFF"));
@@ -202,15 +233,36 @@ public class EngineIntegrationTest {
     @Test
     void caso7_CambioConfiguracion_ApagarSiCambiaTemperaturaEsperada() throws Exception {
         when(rsSitio.getDouble("potencia_contratada_kw")).thenReturn(10.0);
-        
+
         when(rsHabitaciones.next()).thenReturn(true, false);
         when(rsHabitaciones.getString("id")).thenReturn("hab-1");
-        when(rsHabitaciones.getDouble("temperatura_esperada")).thenReturn(15.0); 
+        when(rsHabitaciones.getDouble("temperatura_esperada")).thenReturn(15.0);
         when(rsHabitaciones.getDouble("potencia_kw")).thenReturn(2.0);
         when(rsHabitaciones.getString("id_switch")).thenReturn("sw-1");
-        when(rsHabitaciones.getObject("temp_actual")).thenReturn(18.0); 
+        when(rsHabitaciones.getObject("temp_actual")).thenReturn(18.0);
         when(rsHabitaciones.getDouble("temp_actual")).thenReturn(18.0);
         when(rsHabitaciones.getTimestamp(anyString())).thenReturn(Timestamp.from(Instant.now()));
+
+        when(restTemplateMock.exchange(anyString(), eq(HttpMethod.GET), any(), eq(String.class)))
+                 .thenReturn(ResponseEntity.ok("ON"));
+
+        evaluadorJobService.ejecutarCicloDeControl();
+
+        verify(switchClientService, times(1)).comandarSwitch(anyString(), eq("sw-1"), eq("OFF"));
+    }
+
+    @Test
+    void caso8_SinLecturasMqtt_FailSafeNoDebeEncenderYSiEstaOnDebeApagar() throws Exception {
+        when(rsSitio.getDouble("potencia_contratada_kw")).thenReturn(10.0);
+        when(rsSitio.getString("tarifa_dias")).thenReturn("SUNDAY"); // fuera de punta si hoy no es domingo
+
+        when(rsHabitaciones.next()).thenReturn(true, false);
+        when(rsHabitaciones.getString("id")).thenReturn("hab-1");
+        when(rsHabitaciones.getDouble("temperatura_esperada")).thenReturn(22.0);
+        when(rsHabitaciones.getDouble("potencia_kw")).thenReturn(2.0);
+        when(rsHabitaciones.getString("id_switch")).thenReturn("sw-1");
+        when(rsHabitaciones.getObject("temp_actual")).thenReturn(null);
+        when(rsHabitaciones.getTimestamp(anyString())).thenReturn(null);
 
         when(restTemplateMock.exchange(anyString(), eq(HttpMethod.GET), any(), eq(String.class)))
                  .thenReturn(ResponseEntity.ok("ON"));

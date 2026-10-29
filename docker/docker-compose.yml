@@ -37,6 +37,26 @@ services:
     networks:
       - iot-network
 
+  mcp:
+    build:
+      context: ..
+      dockerfile: modules/mcp/Dockerfile
+    image: ecowarm-mcp:latest
+    container_name: ecowarm_mcp_server
+    ports:
+      - "8081:8081"
+    depends_on:
+      postgres-db:
+        condition: service_healthy
+      engine:
+        condition: service_started
+    env_file:
+      - .env
+    environment:
+      ENGINE_URL: ${ENGINE_URL:-http://engine:8080}
+    networks:
+      - iot-network
+
 networks:
   iot-network:
     driver: bridge
