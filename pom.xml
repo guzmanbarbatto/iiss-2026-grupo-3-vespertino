@@ -16,20 +16,15 @@
     </modules>
 
     <properties>
-        <maven.compiler.source>25</maven.compiler.source>
-        <maven.compiler.target>25</maven.compiler.target>
+        <maven.compiler.release>25</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 
-        <!-- Versiones de dependencias -->
-        <paho.version>1.2.5</paho.version>
-        <postgresql.version>42.7.2</postgresql.version>
-        <json.version>20240303</json.version>
-        <jackson.version>2.18.10</jackson.version>
+        <!-- Dependencias. JUnit, Mockito, Jackson y PostgreSQL los versiona el BOM de Spring Boot. -->
         <spring.boot.version>3.5.14</spring.boot.version>
-        <junit.version>5.11.0</junit.version>
-        <mockito.version>5.14.0</mockito.version>
+        <paho.version>1.2.5</paho.version>
 
-        <!-- Versiones de Plugins para Sprint 5 -->
+        <!-- Plugins: todas las versiones fijadas para que el build sea reproducible -->
+        <compiler.plugin.version>3.13.0</compiler.plugin.version>
         <surefire.version>3.5.0</surefire.version>
         <jacoco.version>0.8.15</jacoco.version>
         <checkstyle.version>3.6.0</checkstyle.version>
@@ -37,7 +32,6 @@
 
     <dependencyManagement>
         <dependencies>
-            <!-- Spring Boot BOM -->
             <dependency>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-dependencies</artifactId>
@@ -45,38 +39,10 @@
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
-
             <dependency>
                 <groupId>org.eclipse.paho</groupId>
                 <artifactId>org.eclipse.paho.client.mqttv3</artifactId>
                 <version>${paho.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>org.postgresql</groupId>
-                <artifactId>postgresql</artifactId>
-                <version>${postgresql.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>org.json</groupId>
-                <artifactId>json</artifactId>
-                <version>${json.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>com.fasterxml.jackson.core</groupId>
-                <artifactId>jackson-databind</artifactId>
-                <version>${jackson.version}</version>
-            </dependency>
-
-            <!-- TDD: JUnit 5 y Mockito -->
-            <dependency>
-                <groupId>org.junit.jupiter</groupId>
-                <artifactId>junit-jupiter-api</artifactId>
-                <version>${junit.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>org.mockito</groupId>
-                <artifactId>mockito-core</artifactId>
-                <version>${mockito.version}</version>
             </dependency>
         </dependencies>
     </dependencyManagement>
@@ -84,21 +50,36 @@
     <build>
         <pluginManagement>
             <plugins>
-                <!-- Plugin para ejecutar los tests de JUnit 5 -->
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-compiler-plugin</artifactId>
+                    <version>${compiler.plugin.version}</version>
+                    <configuration>
+                        <parameters>true</parameters>
+                    </configuration>
+                </plugin>
+
                 <plugin>
                     <groupId>org.apache.maven.plugins</groupId>
                     <artifactId>maven-surefire-plugin</artifactId>
-                    <version>3.5.0</version>
-                    <dependencies>
-                        <dependency>
-                            <groupId>org.junit.jupiter</groupId>
-                            <artifactId>junit-jupiter-engine</artifactId>
-                            <version>5.10.0</version>
-                        </dependency>
-                    </dependencies>
+                    <version>${surefire.version}</version>
                 </plugin>
 
-                <!-- Plugin JaCoCo para reporte de cobertura -->
+                <!-- Sin versión explícita Maven resolvía la última publicada (4.2.0-RC1) para una app Boot 3.5 -->
+                <plugin>
+                    <groupId>org.springframework.boot</groupId>
+                    <artifactId>spring-boot-maven-plugin</artifactId>
+                    <version>${spring.boot.version}</version>
+                    <executions>
+                        <execution>
+                            <goals>
+                                <goal>repackage</goal>
+                            </goals>
+                        </execution>
+                    </executions>
+                </plugin>
+
+                <!-- JaCoCo: falla en la fase test si la cobertura baja del 85% -->
                 <plugin>
                     <groupId>org.jacoco</groupId>
                     <artifactId>jacoco-maven-plugin</artifactId>
@@ -118,6 +99,7 @@
                         </execution>
                         <execution>
                             <id>jacoco-check</id>
+                            <phase>test</phase>
                             <goals>
                                 <goal>check</goal>
                             </goals>
@@ -139,19 +121,23 @@
                     </executions>
                 </plugin>
 
-                <!-- Plugin Checkstyle para Estándares de Codificación -->
+                <!--
+                    Checkstyle con las reglas del equipo (google_checks.xml de la raíz). La ruta es relativa
+                    al módulo: con solo "google_checks.xml" el plugin no encontraba el archivo y caía en
+                    silencio en la configuración de Google que trae Checkstyle (2 espacios, 100 columnas).
+                -->
                 <plugin>
                     <groupId>org.apache.maven.plugins</groupId>
                     <artifactId>maven-checkstyle-plugin</artifactId>
                     <version>${checkstyle.version}</version>
                     <configuration>
-                        <configLocation>google_checks.xml</configLocation>
+                        <configLocation>${project.basedir}/../../google_checks.xml</configLocation>
                         <consoleOutput>true</consoleOutput>
-                        <!-- Lo ponemos en false por ahora para que solo reporte, sin frenar la compilación -->
-                        <failsOnError>false</failsOnError>
+                        <includeTestSourceDirectory>true</includeTestSourceDirectory>
                     </configuration>
                     <executions>
                         <execution>
+                            <id>checkstyle</id>
                             <phase>validate</phase>
                             <goals>
                                 <goal>check</goal>

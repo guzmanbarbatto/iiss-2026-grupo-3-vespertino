@@ -2,6 +2,8 @@ package com.ioteste.mcp;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.options;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -67,6 +69,23 @@ class McpServerContextTest {
         mockMvc.perform(get("/mcp/sse"))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.status").value(401));
+    }
+
+    @Test
+    void corsPermiteClientesWebLocalesComoMcpInspector() throws Exception {
+        mockMvc.perform(options("/mcp/message")
+                        .header("Origin", "http://localhost:6274")
+                        .header("Access-Control-Request-Method", "POST"))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Access-Control-Allow-Origin", "http://localhost:6274"));
+    }
+
+    @Test
+    void corsRechazaSitiosWebAjenos() throws Exception {
+        mockMvc.perform(options("/mcp/message")
+                        .header("Origin", "https://sitio-malicioso.example")
+                        .header("Access-Control-Request-Method", "POST"))
+                .andExpect(status().isForbidden());
     }
 }
 

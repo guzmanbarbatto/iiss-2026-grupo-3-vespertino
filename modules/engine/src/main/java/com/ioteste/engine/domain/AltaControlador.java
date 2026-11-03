@@ -4,4 +4,4 @@ public record AltaControlador(
     String etiqueta,
     String baseUrl,
     String apiKey
-) {}
+) { }

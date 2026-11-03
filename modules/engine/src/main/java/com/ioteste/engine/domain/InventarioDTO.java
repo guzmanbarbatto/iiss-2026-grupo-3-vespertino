@@ -6,4 +6,4 @@ public record InventarioDTO(
     String schemaVersion,
     Sitio sitio,
     List<Habitacion> habitaciones
-) {}
+) { }

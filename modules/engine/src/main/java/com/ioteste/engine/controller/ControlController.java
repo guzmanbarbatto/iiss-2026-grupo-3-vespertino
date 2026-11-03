@@ -1,8 +1,12 @@
 package com.ioteste.engine.controller;
 
 import com.ioteste.engine.domain.ComandoControl;
+import com.ioteste.engine.domain.ErrorRespuesta;
 import com.ioteste.engine.domain.EstadoControl;
 import com.ioteste.engine.service.EvaluadorJobService;
+import java.time.Instant;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeParseException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -10,91 +14,52 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.time.Instant;
-import java.time.ZoneOffset;
-import java.time.ZonedDateTime;
-import java.time.format.DateTimeFormatter;
-import java.time.format.DateTimeParseException;
-
+/** §5.2: arrancar y detener el control. El estado vive en el motor, no en este controlador. */
 @RestController
 @RequestMapping("/control")
 public class ControlController {
 
-    private static final DateTimeFormatter ISO_UTC =
-            DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'");
+    private final EvaluadorJobService motor;
 
-    // Variables de estado en memoria
-    private String estado = "DETENIDO";
-    private String fechaHora = null;
-    private Double factorTiempo = null;
-    private String iniciadoEn = null;
-
-    // Dependencia del motor para propagar el factor de aceleración
-    private final EvaluadorJobService evaluadorJobService;
-
-    public ControlController(EvaluadorJobService evaluadorJobService) {
-        this.evaluadorJobService = evaluadorJobService;
+    public ControlController(EvaluadorJobService motor) {
+        this.motor = motor;
     }
 
     @GetMapping
-    public ResponseEntity<EstadoControl> obtenerControl() {
-        if ("EN_EJECUCION".equals(this.estado)) {
-            String ahoraLogico = evaluadorJobService.obtenerRelojSimulado()
-                    .toInstant()
-                    .atOffset(ZoneOffset.UTC)
-                    .format(ISO_UTC);
-            return ResponseEntity.ok(new EstadoControl(estado, ahoraLogico, factorTiempo, iniciadoEn));
-        }
-        return ResponseEntity.ok(new EstadoControl(estado, fechaHora, factorTiempo, iniciadoEn));
+    public EstadoControl obtenerControl() {
+        return motor.estadoControl();
     }
 
     @PostMapping("/comandos")
-    public ResponseEntity<EstadoControl> comandarControl(@RequestBody ComandoControl comando) {
-        if (comando == null || comando.accion() == null) {
-            return ResponseEntity.badRequest().build();
+    public ResponseEntity<?> comandarControl(@RequestBody ComandoControl comando) {
+        if (comando.accion() == null) {
+            return error("accion es obligatoria (INICIAR o DETENER)");
         }
+        return switch (comando.accion()) {
+            case "INICIAR" -> iniciar(comando);
+            case "DETENER" -> ResponseEntity.ok(motor.detenerMotor());
+            default -> error("accion desconocida '" + comando.accion() + "': debe ser INICIAR o DETENER");
+        };
+    }
 
-        if ("INICIAR".equals(comando.accion())) {
-            // El contrato exige un 400 si se envía INICIAR sin una fechaHora o si no es ISO-8601
-            if (comando.fechaHora() == null || comando.fechaHora().isBlank()) {
-                return ResponseEntity.badRequest().build();
-            }
-            try {
-                ZonedDateTime.parse(comando.fechaHora());
-            } catch (DateTimeParseException e) {
-                return ResponseEntity.badRequest().build();
-            }
-
-            // El contrato exige rechazar con 400 si factorTiempo no es mayor que cero
-            if (comando.factorTiempo() != null
-                    && (comando.factorTiempo() <= 0 || comando.factorTiempo().isNaN()
-                            || comando.factorTiempo().isInfinite())) {
-                return ResponseEntity.badRequest().build();
-            }
-
-            this.estado = "EN_EJECUCION";
-            this.fechaHora = comando.fechaHora();
-            this.factorTiempo = (comando.factorTiempo() != null) ? comando.factorTiempo() : 1.0;
-
-            // Genera la hora real del servidor en formato ISO-8601 (UTC)
-            this.iniciadoEn = Instant.now().atOffset(ZoneOffset.UTC).format(ISO_UTC);
-
-            // Notificar al motor para que arranque con el factor de aceleración
-            evaluadorJobService.iniciarMotor(this.factorTiempo, this.fechaHora);
-
-        } else if ("DETENER".equals(comando.accion())) {
-            this.estado = "DETENIDO";
-            this.fechaHora = null;
-            this.factorTiempo = null;
-            this.iniciadoEn = null;
-
-            // Notificar al motor para que se detenga
-            evaluadorJobService.detenerMotor();
-        } else {
-            // Rechaza si la acción no es válida
-            return ResponseEntity.badRequest().build();
+    private ResponseEntity<?> iniciar(ComandoControl comando) {
+        if (comando.fechaHora() == null || comando.fechaHora().isBlank()) {
+            return error("INICIAR requiere fechaHora");
         }
+        Instant fechaHora;
+        try {
+            fechaHora = ZonedDateTime.parse(comando.fechaHora()).toInstant();
+        } catch (DateTimeParseException e) {
+            return error("fechaHora no es un instante ISO-8601 válido: '" + comando.fechaHora() + "'");
+        }
+        double factor = comando.factorTiempo() == null ? 1.0 : comando.factorTiempo();
+        if (!(factor > 0) || Double.isInfinite(factor)) {
+            return error("factorTiempo debe ser un número mayor que cero (es " + comando.factorTiempo() + ")");
+        }
+        return ResponseEntity.ok(motor.iniciarMotor(fechaHora, factor));
+    }
 
-        return ResponseEntity.ok(new EstadoControl(estado, fechaHora, factorTiempo, iniciadoEn));
+    private static ResponseEntity<ErrorRespuesta> error(String mensaje) {
+        return ResponseEntity.badRequest().body(ErrorRespuesta.de(400, mensaje));
     }
 }
