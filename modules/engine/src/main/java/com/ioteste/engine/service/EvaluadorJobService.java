@@ -1,304 +1,244 @@
 package com.ioteste.engine.service;
 
+import com.ioteste.core.domain.AccionSwitch;
 import com.ioteste.core.domain.EstadoSwitch;
 import com.ioteste.core.domain.HabitacionDTO;
 import com.ioteste.core.domain.Orden;
 import com.ioteste.core.domain.Salida;
 import com.ioteste.core.domain.TarifaPunta;
 import com.ioteste.core.service.EvaluadorCore;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.HttpEntity;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.HttpMethod;
-import org.springframework.http.client.SimpleClientHttpRequestFactory;
-import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
-import org.springframework.stereotype.Service;
-import org.springframework.web.client.RestTemplate;
-
-import javax.sql.DataSource;
-import java.sql.Connection;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
-import java.sql.Timestamp;
+import com.ioteste.engine.domain.EstadoControl;
+import com.ioteste.engine.domain.Franja;
+import com.ioteste.engine.domain.Habitacion;
+import com.ioteste.engine.domain.InventarioDTO;
+import com.ioteste.engine.repository.HistoricoRepository;
+import com.ioteste.engine.repository.HistoricoRepository.Lectura;
+import com.ioteste.engine.repository.SitioRepository;
+import java.math.BigDecimal;
 import java.time.DayOfWeek;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalTime;
-import java.time.ZoneId;
 import java.time.ZonedDateTime;
-import java.time.temporal.ChronoUnit;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
-import java.util.HashSet;
+import java.util.EnumSet;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ScheduledFuture;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.scheduling.TaskScheduler;
+import org.springframework.stereotype.Service;
 
+/** Motor del control: cada 30 s de tiempo lógico arma el estado de la casa, consulta al core y comanda. */
 @Service
 public class EvaluadorJobService {
 
-    private final SwitchClientService switchClientService;
-    private final DataSource dataSource;
-    private final EvaluadorCore evaluadorCore;
-    private final RestTemplate restTemplate;
-    private final ThreadPoolTaskScheduler scheduler;
+    private static final Logger LOG = LoggerFactory.getLogger(EvaluadorJobService.class);
+
+    static final long INTERVALO_LOGICO_MS = 30_000;
+    static final long INTERVALO_MINIMO_REAL_MS = 500;
+    /** Una lectura más vieja que esto (en tiempo lógico) se considera un termostato caído. */
+    static final long LECTURA_VENCIDA_SEGUNDOS = 600;
+    /** Temperatura que se asume sin lecturas válidas: fuerza el apagado (fail-safe). */
+    static final double TEMPERATURA_FAIL_SAFE = 99.0;
+    private static final DateTimeFormatter DIA_HORA = DateTimeFormatter.ofPattern("dd/MM HH:mm");
+    private static final String[] DIAS = {"lun", "mar", "mié", "jue", "vie", "sáb", "dom"};
+
+    private final SitioRepository sitioRepository;
+    private final HistoricoRepository historicoRepository;
+    private final SwitchClientService switchClient;
+    private final RelojControl reloj;
+    private final TaskScheduler scheduler;
+    private final EvaluadorCore evaluadorCore = new EvaluadorCore();
 
     private ScheduledFuture<?> tareaProgramada;
-    private Double factorAceleracion = 1.0;
+    private volatile boolean avisoSinSitioDado;
+    private volatile List<String> ultimoSinLecturas = List.of();
 
-    private Instant inicioReal;
-    private ZonedDateTime inicioSimulado;
-
-    @Value("${simulador.url}")
-    private String simuladorUrlBase;
-
-    @Value("${simulador.api.key:}")
-    private String simuladorApiKey;
-
-    // Caché en memoria para evitar saturar la red
-    private final Map<String, EstadoSwitch> cacheSwitches = new ConcurrentHashMap<>();
-
-    public EvaluadorJobService(SwitchClientService switchClientService, DataSource dataSource) {
-        this.switchClientService = switchClientService;
-        this.dataSource = dataSource;
-        this.evaluadorCore = new EvaluadorCore();
-
-        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
-        factory.setConnectTimeout(2000);
-        factory.setReadTimeout(2000);
-        this.restTemplate = new RestTemplate(factory);
-
-        this.scheduler = new ThreadPoolTaskScheduler();
-        this.scheduler.setPoolSize(1);
-        this.scheduler.setThreadNamePrefix("MotorEngine-");
-        this.scheduler.initialize();
+    public EvaluadorJobService(
+            SitioRepository sitioRepository,
+            HistoricoRepository historicoRepository,
+            SwitchClientService switchClient,
+            RelojControl reloj,
+            TaskScheduler scheduler) {
+        this.sitioRepository = sitioRepository;
+        this.historicoRepository = historicoRepository;
+        this.switchClient = switchClient;
+        this.reloj = reloj;
+        this.scheduler = scheduler;
     }
 
-    public synchronized void iniciarMotor(Double factor, String fechaHora) {
-        this.factorAceleracion = (factor != null && factor > 0) ? factor : 1.0;
-        this.inicioReal = Instant.now();
-        this.cacheSwitches.clear();
-
-        try {
-            this.inicioSimulado = ZonedDateTime.parse(fechaHora)
-                    .withZoneSameInstant(ZoneId.of("America/Montevideo"));
-        } catch (Exception e) {
-            this.inicioSimulado = ZonedDateTime.now(ZoneId.of("America/Montevideo"));
-        }
-
-        if (tareaProgramada != null && !tareaProgramada.isCancelled()) {
-            tareaProgramada.cancel(false);
-        }
-
-        long intervaloRealMillis = (long) (30000 / this.factorAceleracion);
-        if (intervaloRealMillis < 500) {
-            intervaloRealMillis = 500;
-        }
-
-        tareaProgramada = scheduler.scheduleAtFixedRate(
-                this::ejecutarCicloDeControl,
-                Duration.ofMillis(intervaloRealMillis)
-        );
+    /** Arranca el control (o lo re-sincroniza si ya corría) con el reloj lógico en {@code fechaHora}. */
+    public synchronized EstadoControl iniciarMotor(Instant fechaHora, double factorTiempo) {
+        cancelarTarea();
+        reloj.sincronizar(fechaHora, factorTiempo);
+        long intervaloReal = Math.max(INTERVALO_MINIMO_REAL_MS, (long) (INTERVALO_LOGICO_MS / factorTiempo));
+        tareaProgramada = scheduler.scheduleAtFixedRate(this::ejecutarCicloDeControl, Duration.ofMillis(intervaloReal));
+        LOG.info("Control iniciado: hora simulada {} (×{}, un ciclo cada {} ms)",
+                horaSimulada(fechaHora.atZone(RelojControl.ZONA_LOCAL)),
+                BigDecimal.valueOf(factorTiempo).stripTrailingZeros().toPlainString(), intervaloReal);
+        return reloj.estado();
     }
 
-    public synchronized void detenerMotor() {
-        if (tareaProgramada != null && !tareaProgramada.isCancelled()) {
-            tareaProgramada.cancel(false);
-        }
-        this.inicioReal = null;
-        this.inicioSimulado = null;
-        this.cacheSwitches.clear();
+    /** Detiene el control. Es idempotente y no apaga lo que haya quedado encendido. */
+    public synchronized EstadoControl detenerMotor() {
+        cancelarTarea();
+        reloj.detener();
+        LOG.info("Control detenido");
+        return reloj.estado();
     }
 
-    public ZonedDateTime obtenerRelojSimulado() {
-        if (inicioReal == null || inicioSimulado == null) {
-            return ZonedDateTime.now(ZoneId.of("America/Montevideo"));
-        }
-        long millisReales = Duration.between(inicioReal, Instant.now()).toMillis();
-        long millisAcelerados = (long) (millisReales * factorAceleracion);
-        return inicioSimulado.plus(millisAcelerados, ChronoUnit.MILLIS);
+    public EstadoControl estadoControl() {
+        return reloj.estado();
     }
 
+    /** Un ciclo de control. Nunca lanza: una excepción cancelaría las ejecuciones siguientes del scheduler. */
     public void ejecutarCicloDeControl() {
-        ZonedDateTime ahoraSimulado = obtenerRelojSimulado();
-        System.out.println("⏳ Ciclo Core | Hora simulada: " + ahoraSimulado);
-
-        try (Connection conn = dataSource.getConnection()) {
-
-            // 1. OBTENER DATOS DEL SITIO Y LA TARIFA
-            double potenciaContratada = 0.0;
-            LocalTime tarifaDesde = LocalTime.of(0, 0);
-            LocalTime tarifaHasta = LocalTime.of(0, 0);
-            Set<DayOfWeek> diasTarifa = new HashSet<>();
-
-            String querySitio = "SELECT potencia_contratada_kw, tarifa_desde, tarifa_hasta, tarifa_dias FROM sitio LIMIT 1";
-
-            try (PreparedStatement stmt = conn.prepareStatement(querySitio);
-                 ResultSet rs = stmt.executeQuery()) {
-                if (rs.next()) {
-                    potenciaContratada = rs.getDouble("potencia_contratada_kw");
-                    tarifaDesde = rs.getTime("tarifa_desde").toLocalTime();
-                    tarifaHasta = rs.getTime("tarifa_hasta").toLocalTime();
-                    String diasStr = rs.getString("tarifa_dias");
-
-                    if (diasStr != null && !diasStr.isEmpty()) {
-                        for (String dia : diasStr.split(",")) {
-                            String d = dia.trim().toUpperCase();
-                            switch (d) {
-                                case "HABILES":
-                                    diasTarifa.add(DayOfWeek.MONDAY);
-                                    diasTarifa.add(DayOfWeek.TUESDAY);
-                                    diasTarifa.add(DayOfWeek.WEDNESDAY);
-                                    diasTarifa.add(DayOfWeek.THURSDAY);
-                                    diasTarifa.add(DayOfWeek.FRIDAY);
-                                    break;
-                                case "FINES_DE_SEMANA":
-                                case "FIN DE SEMANA":
-                                    diasTarifa.add(DayOfWeek.SATURDAY);
-                                    diasTarifa.add(DayOfWeek.SUNDAY);
-                                    break;
-                                case "TODOS":
-                                    diasTarifa.add(DayOfWeek.MONDAY);
-                                    diasTarifa.add(DayOfWeek.TUESDAY);
-                                    diasTarifa.add(DayOfWeek.WEDNESDAY);
-                                    diasTarifa.add(DayOfWeek.THURSDAY);
-                                    diasTarifa.add(DayOfWeek.FRIDAY);
-                                    diasTarifa.add(DayOfWeek.SATURDAY);
-                                    diasTarifa.add(DayOfWeek.SUNDAY);
-                                    break;
-                                default:
-                                    try {
-                                        diasTarifa.add(DayOfWeek.valueOf(d));
-                                    } catch (IllegalArgumentException e) { }
-                                    break;
-                            }
-                        }
-                    }
+        try {
+            Optional<InventarioDTO> inventario = sitioRepository.obtenerInventario();
+            if (inventario.isEmpty()) {
+                // Se avisa una sola vez, no en cada ciclo (con factor alto serían varias líneas por segundo)
+                if (!avisoSinSitioDado) {
+                    LOG.warn("No hay un sitio cargado: el control espera el PUT /sitio del simulador");
+                    avisoSinSitioDado = true;
                 }
+                return;
             }
+            avisoSinSitioDado = false;
+            evaluar(inventario.get(), reloj.ahora());
+        } catch (RuntimeException e) {
+            LOG.error("Error en el ciclo de control: {}", e.getMessage(), e);
+        }
+    }
 
-            TarifaPunta tarifa = new TarifaPunta(tarifaDesde, tarifaHasta, diasTarifa);
+    private void evaluar(InventarioDTO inventario, ZonedDateTime ahora) {
+        Map<String, Lectura> lecturas = historicoRepository.ultimasLecturas();
+        Map<String, String> switchPorHabitacion = new HashMap<>();
+        List<HabitacionDTO> habitaciones = new ArrayList<>();
+        List<String> sinLecturasVigentes = new ArrayList<>();
 
-            // 2. OBTENER HABITACIONES Y ESTADOS (Fail-Safe + Caché)
-            List<HabitacionDTO> habitaciones = new ArrayList<>();
-            String queryHabitaciones =
-                "SELECT h.id, h.temperatura_esperada, h.potencia_kw, h.id_switch, "
-                + "(SELECT temperatura_c FROM historico_temperatura ht "
-                + "WHERE ht.habitacion_id = h.id ORDER BY fecha_hora DESC LIMIT 1) as temp_actual, "
-                + "(SELECT fecha_hora FROM historico_temperatura ht "
-                + "WHERE ht.habitacion_id = h.id ORDER BY fecha_hora DESC LIMIT 1) as ultima_fecha "
-                + "FROM habitacion h";
-
-            try (PreparedStatement stmt = conn.prepareStatement(queryHabitaciones);
-                 ResultSet rs = stmt.executeQuery()) {
-                while (rs.next()) {
-                    String idHab = rs.getString("id");
-                    double tempEsperada = rs.getDouble("temperatura_esperada");
-                    double potenciaKw = rs.getDouble("potencia_kw");
-                    String idSwitch = rs.getString("id_switch");
-
-                    // Fail-Safe: si no hay lecturas o la lectura está vencida, forzamos 99.0C para apagar
-                    double tempActual = 99.0;
-                    Object tempObj = rs.getObject("temp_actual");
-                    Timestamp ultimaFecha = rs.getTimestamp("ultima_fecha");
-
-                    if (tempObj != null && ultimaFecha != null) {
-                        // Diferencia en tiempo simulado (el ts del simulador viene en el reloj virtual)
-                        long diffSimulado = Math.abs(
-                                Duration.between(ultimaFecha.toInstant(), ahoraSimulado.toInstant()).getSeconds());
-
-                        // Diferencia en tiempo real escalado (para lecturas insertadas con reloj real)
-                        long diffRealEscalado = diffSimulado;
-                        if (inicioReal != null && inicioSimulado != null) {
-                            long millisDesdeInicio = Duration.between(inicioReal, ultimaFecha.toInstant()).toMillis();
-                            ZonedDateTime fechaSimuladaDelRegistro = inicioSimulado.plus(
-                                    (long) (millisDesdeInicio * factorAceleracion), ChronoUnit.MILLIS);
-                            diffRealEscalado = Math.abs(
-                                    Duration.between(fechaSimuladaDelRegistro, ahoraSimulado).getSeconds());
-                        }
-
-                        long segundosInactivo = Math.min(diffSimulado, diffRealEscalado);
-                        if (segundosInactivo <= 600) {
-                            tempActual = rs.getDouble("temp_actual");
-                        } else {
-                            System.err.println("⚠️ Termostato [" + idHab
-                                    + "] inactivo. Forzando temperatura crítica (99.0C).");
-                            tempActual = 99.0;
-                        }
-                    }
-
-                    // Se consulta HTTP solo si el switch NO está en el caché
-                    EstadoSwitch estadoActual = cacheSwitches.computeIfAbsent(idSwitch, key -> {
-                        try {
-                            HttpHeaders headers = new HttpHeaders();
-                            headers.set("X-API-Key", simuladorApiKey);
-                            HttpEntity<Void> getEntity = new HttpEntity<>(headers);
-
-                            String urlEstado = simuladorUrlBase + "/switches/" + key;
-                            String respuesta = restTemplate.exchange(
-                                    urlEstado, HttpMethod.GET, getEntity, String.class).getBody();
-
-                            if (respuesta != null && respuesta.contains("ON") && !respuesta.contains("DESCONOCIDO")) {
-                                return EstadoSwitch.ON;
-                            }
-                        } catch (Exception e) {
-                            return EstadoSwitch.ON;
-                        }
-                        return EstadoSwitch.OFF;
-                    });
-
-                    habitaciones.add(new HabitacionDTO(idHab, tempEsperada, tempActual, potenciaKw, estadoActual));
-                }
+        for (Habitacion hab : inventario.habitaciones()) {
+            switchPorHabitacion.put(hab.id(), hab.idSwitch());
+            Double temperatura = temperaturaVigente(lecturas.get(hab.id()), ahora);
+            if (temperatura == null) {
+                sinLecturasVigentes.add(hab.id());
+                temperatura = TEMPERATURA_FAIL_SAFE;
             }
+            habitaciones.add(new HabitacionDTO(hab.id(), hab.temperaturaEsperada(), temperatura, hab.potenciaKW(),
+                    switchClient.consultarEstado(hab.idSwitch())));
+        }
 
-            System.out.println("🔍 RADIOGRAFÍA DEL MOTOR:");
-            System.out.println("   Hora motor: " + ahoraSimulado.toLocalTime()
-                    + " | Punta: " + tarifaDesde + "-" + tarifaHasta
-                    + " | Potencia DB: " + potenciaContratada + "kW");
-            for (HabitacionDTO h : habitaciones) {
-                System.out.println("   -> Hab: " + h.id() + " | Temp Actual: " + h.temperaturaActual()
-                        + "C | Esperada: " + h.temperaturaEsperada() + "C | Switch: " + h.estadoActual());
+        avisarSinLecturas(sinLecturasVigentes, ahora);
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("Ciclo {} | potencia contratada {} kW | {}", ahora,
+                    inventario.sitio().potenciaContratadaKW(), habitaciones);
+        }
+
+        Salida salida = evaluadorCore.evaluarEstado(ahora, inventario.sitio().potenciaContratadaKW(),
+                tarifaPunta(inventario.sitio().tarifa().punta()), habitaciones);
+
+        Map<String, EstadoSwitch> estadoFinal = new LinkedHashMap<>();
+        habitaciones.forEach(h -> estadoFinal.put(h.id(), h.estadoActual()));
+        List<String> cambios = new ArrayList<>();
+        for (Orden orden : salida.ordenes()) {
+            if (switchClient.comandarSwitch(switchPorHabitacion.get(orden.idHabitacion()), orden.accion().name())) {
+                cambios.add(orden.idHabitacion() + " → " + orden.accion());
+                estadoFinal.put(orden.idHabitacion(),
+                        orden.accion() == AccionSwitch.ON ? EstadoSwitch.ON : EstadoSwitch.OFF);
             }
+        }
+        if (!cambios.isEmpty()) {
+            resumirCiclo(ahora, cambios, estadoFinal, habitaciones, inventario.sitio().potenciaContratadaKW());
+        }
+    }
 
-            // 3. LLAMAR AL EVALUADOR CORE
-            Salida resultado = evaluadorCore.evaluarEstado(ahoraSimulado, potenciaContratada, tarifa, habitaciones);
-
-            // 4. DISPARAR LAS ÓRDENES Y ACTUALIZAR CACHÉ SOLO SI EL POST FUE EXITOSO
-            for (Orden orden : resultado.ordenes()) {
-                try {
-                    String accionStr = orden.accion().name();
-                    String idSwitchFinal = null;
-
-                    String querySwitch = "SELECT id_switch FROM habitacion WHERE id = ?";
-                    try (PreparedStatement stmt = conn.prepareStatement(querySwitch)) {
-                        stmt.setString(1, orden.idHabitacion());
-                        try (ResultSet rs = stmt.executeQuery()) {
-                            if (rs.next()) {
-                                idSwitchFinal = rs.getString("id_switch");
-                            }
-                        }
-                    }
-
-                    if (idSwitchFinal != null) {
-                        boolean exito = switchClientService.comandarSwitch(
-                                simuladorUrlBase, idSwitchFinal, accionStr);
-                        if (exito) {
-                            EstadoSwitch nuevoEstado = (accionStr.equals("ON") || accionStr.equals("ENCENDER"))
-                                    ? EstadoSwitch.ON : EstadoSwitch.OFF;
-                            cacheSwitches.put(idSwitchFinal, nuevoEstado);
-                        } else {
-                            cacheSwitches.remove(idSwitchFinal);
-                        }
-                    }
-                } catch (Exception e) {
-                    System.err.println("⚠️ Tolerancia a fallos: Ignorando error al comandar "
-                            + orden.idHabitacion() + ". Continuando con el resto... (" + e.getMessage() + ")");
-                }
+    /**
+     * Una línea por ciclo con cambios: hora simulada, qué se encendió o apagó, y cómo queda repartida la
+     * potencia. Ej.: {@code [simulado lun 26/10 17:00] room1 → OFF | en uso 0.8 de 3.7 kW: room2}.
+     */
+    private static void resumirCiclo(ZonedDateTime ahora, List<String> cambios, Map<String, EstadoSwitch> estadoFinal,
+            List<HabitacionDTO> habitaciones, double potenciaContratada) {
+        List<String> encendidas = new ArrayList<>();
+        double enUso = 0;
+        for (HabitacionDTO h : habitaciones) {
+            if (estadoFinal.get(h.id()) == EstadoSwitch.ON) {
+                encendidas.add(h.id());
+                enUso += h.potenciaKW();
             }
+        }
+        LOG.info("[simulado {}] {} | en uso {} de {} kW: {}", horaSimulada(ahora), String.join(", ", cambios),
+                kw(enUso), kw(potenciaContratada), encendidas.isEmpty() ? "ninguna" : String.join(", ", encendidas));
+    }
 
-        } catch (Exception e) {
-            System.err.println("Error crítico ejecutando EvaluadorJobService: " + e.getMessage());
+    /** Avisa solo cuando cambia el conjunto de habitaciones sin lecturas, no en cada ciclo. */
+    private void avisarSinLecturas(List<String> sinLecturas, ZonedDateTime ahora) {
+        if (sinLecturas.equals(ultimoSinLecturas)) {
+            return;
+        }
+        if (sinLecturas.isEmpty()) {
+            LOG.info("[simulado {}] Volvieron las lecturas de todas las habitaciones", horaSimulada(ahora));
+        } else {
+            LOG.warn("[simulado {}] Fail-safe: sin lecturas recientes de {}; se apagan por seguridad",
+                    horaSimulada(ahora), String.join(", ", sinLecturas));
+        }
+        ultimoSinLecturas = List.copyOf(sinLecturas);
+    }
+
+    /** Hora simulada legible en hora local del sitio, por ejemplo {@code lun 26/10 17:00}. */
+    static String horaSimulada(ZonedDateTime instante) {
+        ZonedDateTime local = instante.withZoneSameInstant(RelojControl.ZONA_LOCAL);
+        return DIAS[local.getDayOfWeek().getValue() - 1] + " " + DIA_HORA.format(local);
+    }
+
+    private static String kw(double valor) {
+        return String.format(Locale.ROOT, "%.1f", valor);
+    }
+
+    /**
+     * Temperatura de la última lectura, o {@code null} si no hay o está vencida.
+     *
+     * <p>El {@code ts} del termostato puede venir en el reloj virtual del simulador o en el real: se compara
+     * contra la hora lógica de las dos formas y alcanza con que una la considere reciente.
+     */
+    private Double temperaturaVigente(Lectura lectura, ZonedDateTime ahora) {
+        if (lectura == null) {
+            return null;
+        }
+        long antiguedadLogica = Math.abs(Duration.between(lectura.fechaHora(), ahora.toInstant()).getSeconds());
+        long antiguedadReal = Math.abs(Duration.between(
+                reloj.aLogico(lectura.fechaHora()).toInstant(), ahora.toInstant()).getSeconds());
+        if (Math.min(antiguedadLogica, antiguedadReal) > LECTURA_VENCIDA_SEGUNDOS) {
+            return null;
+        }
+        return lectura.temperaturaC();
+    }
+
+    static TarifaPunta tarifaPunta(Franja franja) {
+        return new TarifaPunta(LocalTime.parse(franja.desde()), LocalTime.parse(franja.hasta()), dias(franja.dias()));
+    }
+
+    private static Set<DayOfWeek> dias(String dias) {
+        return switch (dias) {
+            case "HABILES" -> EnumSet.range(DayOfWeek.MONDAY, DayOfWeek.FRIDAY);
+            case "TODOS" -> EnumSet.allOf(DayOfWeek.class);
+            default -> {
+                LOG.warn("Días de tarifa punta desconocidos '{}': no se aplicará la punta. Recargá el sitio.", dias);
+                yield EnumSet.noneOf(DayOfWeek.class);
+            }
+        };
+    }
+
+    private void cancelarTarea() {
+        if (tareaProgramada != null) {
+            tareaProgramada.cancel(false);
+            tareaProgramada = null;
         }
     }
 }

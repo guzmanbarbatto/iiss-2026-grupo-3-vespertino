@@ -3,6 +3,7 @@ package com.ioteste.core.service;
 import com.ioteste.core.domain.AccionSwitch;
 import com.ioteste.core.domain.EstadoSwitch;
 import com.ioteste.core.domain.HabitacionDTO;
+import com.ioteste.core.domain.Orden;
 import com.ioteste.core.domain.Salida;
 import com.ioteste.core.domain.TarifaPunta;
 import org.junit.jupiter.api.Test;
@@ -210,5 +211,112 @@ public class EvaluadorCoreTest {
         assertEquals(AccionSwitch.OFF, resultado.ordenes().get(0).accion());
         assertEquals("A", resultado.ordenes().get(1).idHabitacion());
         assertEquals(AccionSwitch.ON, resultado.ordenes().get(1).accion());
+    }
+
+    // 6. TESTS DE SWITCH EN ESTADO DESCONOCIDO (no se supone nada: se comanda explícitamente)
+    private final ZonedDateTime martes10hs = ZonedDateTime.of(2026, 10, 6, 10, 0, 0, 0, ZoneId.of("UTC"));
+    private final ZonedDateTime lunes18hs = ZonedDateTime.of(2026, 10, 5, 18, 0, 0, 0, ZoneId.of("UTC"));
+
+    @Test
+    void casoDesconocidoEnTarifaPuntaDebeApagar() {
+        HabitacionDTO habA = new HabitacionDTO("A", 22.0, 15.0, 2.0, EstadoSwitch.DESCONOCIDO);
+
+        Salida resultado = new EvaluadorCore().evaluarEstado(lunes18hs, 10.0, tarifaHabiles, List.of(habA));
+
+        assertEquals(List.of(new Orden("A", AccionSwitch.OFF)), resultado.ordenes());
+    }
+
+    @Test
+    void casoDesconocidoSinNecesidadDeCalorDebeApagar() {
+        HabitacionDTO habA = new HabitacionDTO("A", 20.0, 20.2, 2.0, EstadoSwitch.DESCONOCIDO);
+
+        Salida resultado = new EvaluadorCore().evaluarEstado(martes10hs, 10.0, tarifaHabiles, List.of(habA));
+
+        assertEquals(List.of(new Orden("A", AccionSwitch.OFF)), resultado.ordenes());
+    }
+
+    @Test
+    void casoDesconocidoConFrioYPotenciaDebeEncender() {
+        HabitacionDTO habA = new HabitacionDTO("A", 22.0, 15.0, 2.0, EstadoSwitch.DESCONOCIDO);
+
+        Salida resultado = new EvaluadorCore().evaluarEstado(martes10hs, 10.0, tarifaHabiles, List.of(habA));
+
+        assertEquals(List.of(new Orden("A", AccionSwitch.ON)), resultado.ordenes());
+    }
+
+    @Test
+    void casoDesconocidoConFrioSinPotenciaDebeApagarParaNoSuperarElTope() {
+        HabitacionDTO habA = new HabitacionDTO("A", 22.0, 15.0, 3.0, EstadoSwitch.ON);
+        HabitacionDTO habB = new HabitacionDTO("B", 22.0, 15.0, 2.0, EstadoSwitch.DESCONOCIDO);
+
+        Salida resultado = new EvaluadorCore().evaluarEstado(martes10hs, 4.0, tarifaHabiles, List.of(habA, habB));
+
+        assertEquals(List.of(new Orden("B", AccionSwitch.OFF)), resultado.ordenes());
+    }
+
+    // 7. TESTS DE HISTÉRESIS (evita prender y apagar el relé en cada ciclo)
+    @Test
+    void casoEncendidaDentroDelMargenDeHisteresisSigueEncendida() {
+        HabitacionDTO habA = new HabitacionDTO("A", 20.0, 20.3, 2.0, EstadoSwitch.ON);
+
+        Salida resultado = new EvaluadorCore().evaluarEstado(martes10hs, 10.0, tarifaHabiles, List.of(habA));
+
+        assertTrue(resultado.ordenes().isEmpty());
+    }
+
+    @Test
+    void casoEncendidaQueSuperaElMargenDeHisteresisSeApaga() {
+        double limite = 20.0 + EvaluadorCore.HISTERESIS_C;
+        HabitacionDTO habA = new HabitacionDTO("A", 20.0, limite, 2.0, EstadoSwitch.ON);
+
+        Salida resultado = new EvaluadorCore().evaluarEstado(martes10hs, 10.0, tarifaHabiles, List.of(habA));
+
+        assertEquals(List.of(new Orden("A", AccionSwitch.OFF)), resultado.ordenes());
+    }
+
+    @Test
+    void casoApagadaDentroDelMargenNoSeEnciende() {
+        HabitacionDTO habA = new HabitacionDTO("A", 20.0, 20.0, 2.0, EstadoSwitch.OFF);
+
+        Salida resultado = new EvaluadorCore().evaluarEstado(martes10hs, 10.0, tarifaHabiles, List.of(habA));
+
+        assertTrue(resultado.ordenes().isEmpty());
+    }
+
+    // 8. TESTS DE PRIORIDAD (con potencia escasa, primero la habitación más lejos de su objetivo)
+    @Test
+    void casoPotenciaEscasaPriorizaLaHabitacionMasFriaSinImportarElOrden() {
+        HabitacionDTO habA = new HabitacionDTO("A", 20.0, 19.0, 2.0, EstadoSwitch.OFF);
+        HabitacionDTO habB = new HabitacionDTO("B", 20.0, 12.0, 2.0, EstadoSwitch.OFF);
+
+        Salida resultado = new EvaluadorCore().evaluarEstado(martes10hs, 2.0, tarifaHabiles, List.of(habA, habB));
+
+        assertEquals(List.of(new Orden("B", AccionSwitch.ON)), resultado.ordenes());
+    }
+
+    @Test
+    void casoLasOrdenesDeApagadoVanAntesQueLasDeEncendido() {
+        HabitacionDTO habA = new HabitacionDTO("A", 22.0, 15.0, 1.0, EstadoSwitch.OFF);
+        HabitacionDTO habB = new HabitacionDTO("B", 20.0, 25.0, 1.0, EstadoSwitch.ON);
+        HabitacionDTO habC = new HabitacionDTO("C", 22.0, 15.0, 1.0, EstadoSwitch.OFF);
+
+        Salida resultado = new EvaluadorCore().evaluarEstado(
+                martes10hs, 10.0, tarifaHabiles, List.of(habA, habB, habC));
+
+        assertEquals(List.of(
+                new Orden("B", AccionSwitch.OFF),
+                new Orden("A", AccionSwitch.ON),
+                new Orden("C", AccionSwitch.ON)), resultado.ordenes());
+    }
+
+    @Test
+    void casoFranjaVaciaNuncaEsPunta() {
+        TarifaPunta vacia = new TarifaPunta(LocalTime.of(17, 0), LocalTime.of(17, 0), Set.of(DayOfWeek.MONDAY));
+        HabitacionDTO habA = new HabitacionDTO("A", 22.0, 15.0, 2.0, EstadoSwitch.OFF);
+
+        Salida resultado = new EvaluadorCore().evaluarEstado(
+                lunes18hs.withHour(17), 10.0, vacia, List.of(habA));
+
+        assertEquals(List.of(new Orden("A", AccionSwitch.ON)), resultado.ordenes());
     }
 }

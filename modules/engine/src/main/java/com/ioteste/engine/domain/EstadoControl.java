@@ -5,4 +5,4 @@ public record EstadoControl(
     String fechaHora,
     Double factorTiempo,
     String iniciadoEn
-) {}
+) { }

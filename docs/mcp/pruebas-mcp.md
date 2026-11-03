@@ -98,9 +98,10 @@ Luego de encender la calefacción de `room2`, se invocó la tool `historialTempe
 
 ## 4. Pruebas Automatizadas del Módulo (`mvn test -pl modules/mcp`)
 
-Además de la verificación E2E con MCP Inspector, el módulo cuenta con una suite de **22 pruebas automatizadas** en JUnit 5 y AssertJ/Mockito que se ejecutan en el pipeline de Maven:
+Además de la verificación E2E con MCP Inspector, el módulo cuenta con una suite de **27 pruebas automatizadas** en JUnit 5 y AssertJ/Mockito que se ejecutan en el pipeline de Maven:
 
 - **`EcoWarmToolsTest` (12 tests):** valida todas las reglas de las 7 tools, el cálculo de potencia disponible en toda la casa, la tolerancia a fallos parciales (caída de BD o del simulador reportada en `advertencias`), la validación de parámetros (`fechaHora` ISO-8601, `factorTiempo > 0`, rangos de `limite`) y la advertencia cuando se acciona un switch con el control automático en ejecución.
 - **`ClientesHttpTest` (7 tests):** verifica con `MockRestServiceServer` la serialización/deserialización JSON, el envío del header `X-API-Key` y la traducción de códigos HTTP (`401`, `404`) a mensajes claros para el agente.
-- **`McpServerContextTest` (3 tests):** levanta el contexto completo de Spring Boot, comprueba que las 7 tools queden registradas en el `ToolCallbackProvider` con sus esquemas JSON de entrada y verifica que el filtro de seguridad rechace con `401 Unauthorized` las peticiones sin `X-API-Key` cuando `MCP_API_KEY` está configurada.
+- **`McpServerContextTest` (5 tests):** levanta el contexto completo de Spring Boot, comprueba que las 7 tools queden registradas en el `ToolCallbackProvider` con sus esquemas JSON de entrada, verifica que el filtro de seguridad rechace con `401 Unauthorized` las peticiones sin `X-API-Key` cuando `MCP_API_KEY` está configurada, y que CORS acepte clientes web locales (MCP Inspector) pero rechace sitios ajenos.
+- **`TemperaturaRepositoryTest` (3 tests):** ejecuta las consultas del histórico contra un PostgreSQL real (Testcontainers) con el esquema del engine: última lectura por habitación, historial ordenado con límite y lectura de fechas en UTC sin depender de la zona horaria de la JVM. Sin Docker disponible se omite.
 

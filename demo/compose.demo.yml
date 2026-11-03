@@ -1,0 +1,48 @@
+# Demo con 10 habitaciones: se suma a docker/docker-compose.yml con otros nombres, puertos y volumen,
+# así que no se mezcla con el stack real. Se usa desde scripts/demo-10-habitaciones.sh.
+# Las rutas relativas se resuelven desde docker/ (el directorio del compose principal).
+services:
+  postgres-db:
+    container_name: demo_postgres
+    env_file: !reset []
+    ports: !override ["25432:5432"]
+
+  engine:
+    container_name: demo_engine
+    env_file: !reset []
+    ports: !override ["28080:8080"]
+    environment:
+      APP_API_KEY: clave-demo
+      CONTROLADOR_BASE_URL: http://engine:8080
+      SIMULADOR_URL: http://simulador:9090
+      SIMULADOR_API_KEY: clave-sim
+      MQTT_BROKER_URL: ""
+      DB_URL: jdbc:postgresql://postgres-db:5432/ecowarm
+      DB_USER: ecowarm
+      DB_PASS: ecowarm-demo
+    depends_on:
+      simulador:
+        condition: service_started
+      mosquitto:
+        condition: service_started
+
+  mcp:
+    container_name: demo_mcp
+    env_file: !reset []
+    ports: !override ["28081:8081"]
+
+  simulador:
+    image: python:3.13-alpine
+    container_name: demo_simulador
+    command: ["python", "-u", "/sim/sim10.py"]
+    volumes:
+      - ../demo/sim10.py:/sim/sim10.py:ro
+    ports: ["29090:9090"]
+    networks: [iot-network]
+
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: demo_mosquitto
+    volumes:
+      - ../demo/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+    networks: [iot-network]

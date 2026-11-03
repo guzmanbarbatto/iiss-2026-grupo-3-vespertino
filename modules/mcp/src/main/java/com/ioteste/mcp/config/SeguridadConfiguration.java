@@ -10,6 +10,7 @@ import java.security.MessageDigest;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
+import java.util.List;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
@@ -24,7 +25,10 @@ import org.springframework.web.filter.OncePerRequestFilter;
  * Seguridad del servidor MCP.
  *
  * <ul>
- *   <li>CORS abierto para permitir clientes MCP basados en navegador (por ejemplo MCP Inspector).</li>
+ *   <li>CORS solo para los orígenes de {@code MCP_CORS_ORIGINS} (por defecto, páginas servidas desde
+ *       {@code localhost}, como MCP Inspector). Con {@code *} cualquier sitio web abierto en el navegador
+ *       podía accionar los switches a través de este servidor. Los clientes MCP que no son navegadores no
+ *       envían {@code Origin} y no se ven afectados.</li>
  *   <li>Si {@code MCP_API_KEY} está configurada, exige el header {@code X-API-Key} en todas las
  *       peticiones, con el mismo formato de error 401 que usa el engine.</li>
  * </ul>
@@ -35,9 +39,9 @@ public class SeguridadConfiguration {
     static final String HEADER_API_KEY = "X-API-Key";
 
     @Bean
-    public FilterRegistrationBean<CorsFilter> corsFilter() {
+    public FilterRegistrationBean<CorsFilter> corsFilter(@Value("${mcp.cors.allowed-origins}") List<String> origenes) {
         CorsConfiguration config = new CorsConfiguration();
-        config.addAllowedOriginPattern("*");
+        config.setAllowedOriginPatterns(origenes);
         config.addAllowedHeader("*");
         config.addAllowedMethod("*");
         config.addExposedHeader("Mcp-Session-Id");

@@ -11,8 +11,8 @@ services:
     ports:
       - "5432:5432"
     volumes:
+      # El esquema lo crea y actualiza el engine al arrancar (modules/engine/src/main/resources/schema.sql)
       - ecowarm_data:/var/lib/postgresql/data
-      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
     networks:
       - iot-network
     healthcheck:

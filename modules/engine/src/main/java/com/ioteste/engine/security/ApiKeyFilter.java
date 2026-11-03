@@ -1,54 +1,46 @@
 package com.ioteste.engine.security;
 
-import jakarta.servlet.Filter;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.ioteste.engine.domain.ErrorRespuesta;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
-import jakarta.servlet.ServletRequest;
-import jakarta.servlet.ServletResponse;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.stereotype.Component;
-
 import java.io.IOException;
-import java.time.Instant;
-import java.time.ZoneOffset;
-import java.time.format.DateTimeFormatter;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.MediaType;
+import org.springframework.stereotype.Component;
+import org.springframework.web.filter.OncePerRequestFilter;
 
+/** Exige el header {@code X-API-Key} con la clave del controlador en todas las peticiones. */
 @Component
-public class ApiKeyFilter implements Filter {
+public class ApiKeyFilter extends OncePerRequestFilter {
 
-    // Inyectamos la clave desde el application.properties
-    @Value("${app.api.key}")
-    private String expectedApiKey;
+    private final byte[] claveEsperada;
+    private final ObjectMapper objectMapper;
+
+    public ApiKeyFilter(@Value("${app.api.key}") String apiKey, ObjectMapper objectMapper) {
+        this.claveEsperada = apiKey.getBytes(StandardCharsets.UTF_8);
+        this.objectMapper = objectMapper;
+    }
 
     @Override
-    public void doFilter(ServletRequest request, ServletResponse response, FilterChain chain)
-            throws IOException, ServletException {
+    protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
+            throws ServletException, IOException {
 
-        HttpServletRequest httpRequest = (HttpServletRequest) request;
-        HttpServletResponse httpResponse = (HttpServletResponse) response;
-
-        // Extraemos el header tal como exige el estándar OpenAPI v2
-        String apiKey = httpRequest.getHeader("X-API-Key");
-
-        if (expectedApiKey != null && expectedApiKey.equals(apiKey)) {
-            // La clave es correcta, dejamos pasar la petición a los controladores
+        String recibida = request.getHeader("X-API-Key");
+        // Comparación en tiempo constante: no revela cuántos caracteres de la clave coinciden
+        if (recibida != null && MessageDigest.isEqual(claveEsperada, recibida.getBytes(StandardCharsets.UTF_8))) {
             chain.doFilter(request, response);
-        } else {
-            // Falta la clave o es incorrecta: Devolvemos 401 con el JSON de error estándar
-            httpResponse.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
-            httpResponse.setContentType("application/json; charset=UTF-8");
-            
-            String timestamp = Instant.now().atOffset(ZoneOffset.UTC)
-                    .format(DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'"));
-            String jsonError = String.format(
-                    "{\"timestamp\": \"%s\", \"status\": 401, "
-                    + "\"mensaje\": \"Falta o no coincide el header X-API-Key\", \"errores\": null}", 
-                    timestamp
-            );
-            
-            httpResponse.getWriter().write(jsonError);
+            return;
         }
+
+        response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+        response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+        response.setCharacterEncoding(StandardCharsets.UTF_8.name());
+        objectMapper.writeValue(response.getWriter(),
+                ErrorRespuesta.de(401, "falta o no coincide el header X-API-Key"));
     }
 }

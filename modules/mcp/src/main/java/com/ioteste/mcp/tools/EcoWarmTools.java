@@ -197,7 +197,8 @@ public class EcoWarmTools {
 
     @Tool(description = """
             Enciende o apaga manualmente el switch de calefacción de una habitación. Atención: si el \
-            control automático está EN_EJECUCION puede revertir este cambio en su próximo ciclo; para \
+            control automático está EN_EJECUCION, en su próximo ciclo vuelve a leer el estado del switch \
+            y revierte el cambio si contradice sus reglas (tarifa punta, temperatura o potencia); para \
             un control manual sostenido detené primero el control.""")
     public ResultadoAccionSwitch accionarSwitch(
             @ToolParam(description = "Id de la habitación (por ejemplo hab-1).") String habitacionId,
@@ -268,7 +269,8 @@ public class EcoWarmTools {
     private String advertenciaControlAutomatico() {
         try {
             if (engineClient.obtenerControl().enEjecucion()) {
-                return "El control automático está EN_EJECUCION y puede revertir este cambio en su próximo ciclo.";
+                return "El control automático está EN_EJECUCION: en su próximo ciclo revertirá este cambio "
+                        + "si contradice sus reglas.";
             }
             return null;
         } catch (ServicioExternoException e) {

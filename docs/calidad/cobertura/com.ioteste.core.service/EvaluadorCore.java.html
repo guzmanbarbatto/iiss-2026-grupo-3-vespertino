@@ -7,70 +7,115 @@ import com.ioteste.core.domain.Orden;
 import com.ioteste.core.domain.Salida;
 import com.ioteste.core.domain.TarifaPunta;
 
-import java.time.DayOfWeek;
 import java.time.LocalTime;
 import java.time.ZonedDateTime;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 
 <span class="fc" id="L16">public class EvaluadorCore {</span>
 
+    /**
+     * Margen (°C) por encima de la temperatura esperada a partir del cual se apaga una habitación encendida.
+     * Se enciende apenas la temperatura baja de la esperada, pero no se apaga hasta superarla por este
+     * margen: sin él, una lectura que oscila alrededor del objetivo prendería y apagaría el relé en cada ciclo.
+     */
+    public static final double HISTERESIS_C = 0.5;
+
+    /**
+     * Calcula las órdenes del ciclo. Las de apagado van siempre antes que las de encendido, para que la
+     * potencia se libere antes de volver a ocuparla.
+     */
     public Salida evaluarEstado(
             ZonedDateTime fechaHora,
             double potenciaContratadaKW,
             TarifaPunta tarifa,
             List&lt;HabitacionDTO&gt; habitaciones) {
 
-<span class="fc" id="L24">        List&lt;Orden&gt; ordenes = new ArrayList&lt;&gt;();</span>
-<span class="fc" id="L25">        boolean esPunta = enTarifaPunta(fechaHora, tarifa);</span>
-<span class="fc" id="L26">        double potenciaEnUso = 0.0;</span>
+<span class="fc" id="L35">        List&lt;Orden&gt; apagar = new ArrayList&lt;&gt;();</span>
+<span class="fc" id="L36">        List&lt;Orden&gt; encender = new ArrayList&lt;&gt;();</span>
 
-        // Primero calculamos cuánta potencia ya está tomada por habitaciones encendidas
-<span class="fc bfc" id="L29" title="All 2 branches covered.">        for (HabitacionDTO hab : habitaciones) {</span>
-<span class="fc bfc" id="L30" title="All 2 branches covered.">            if (hab.estadoActual() == EstadoSwitch.ON) {</span>
-<span class="fc" id="L31">                potenciaEnUso += hab.potenciaKW();</span>
-            }
-<span class="fc" id="L33">        }</span>
-
-        // Evaluamos habitación por habitación
-<span class="fc bfc" id="L36" title="All 2 branches covered.">        for (HabitacionDTO hab : habitaciones) {</span>
-<span class="fc bfc" id="L37" title="All 2 branches covered.">            boolean necesitaCalor = hab.temperaturaActual() &lt; hab.temperaturaEsperada();</span>
-
-<span class="fc bfc" id="L39" title="All 2 branches covered.">            if (esPunta) {</span>
-                // REGLA 1: Si es tarifa punta, apagar todo lo que esté prendido
-<span class="pc bpc" id="L41" title="1 of 2 branches missed.">                if (hab.estadoActual() == EstadoSwitch.ON) {</span>
-<span class="fc" id="L42">                    ordenes.add(new Orden(hab.id(), AccionSwitch.OFF));</span>
-<span class="fc" id="L43">                    potenciaEnUso -= hab.potenciaKW(); // Liberamos potencia</span>
+<span class="fc bfc" id="L38" title="All 2 branches covered.">        if (enTarifaPunta(fechaHora, tarifa)) {</span>
+            // REGLA 1: en tarifa punta se apaga todo lo que esté (o pueda estar) encendido
+<span class="fc bfc" id="L40" title="All 2 branches covered.">            for (HabitacionDTO hab : habitaciones) {</span>
+<span class="pc bpc" id="L41" title="1 of 2 branches missed.">                if (hab.estadoActual() != EstadoSwitch.OFF) {</span>
+<span class="fc" id="L42">                    apagar.add(new Orden(hab.id(), AccionSwitch.OFF));</span>
                 }
-            } else {
-<span class="fc bfc" id="L46" title="All 4 branches covered.">                if (!necesitaCalor &amp;&amp; hab.estadoActual() == EstadoSwitch.ON) {</span>
-                    // REGLA 2: Si ya llegó a la temperatura, apagar
-<span class="fc" id="L48">                    ordenes.add(new Orden(hab.id(), AccionSwitch.OFF));</span>
-<span class="fc" id="L49">                    potenciaEnUso -= hab.potenciaKW(); // Liberamos potencia</span>
-<span class="fc bfc" id="L50" title="All 4 branches covered.">                } else if (necesitaCalor &amp;&amp; hab.estadoActual() == EstadoSwitch.OFF) {</span>
-                    // REGLA 3: Si tiene frío, prender SOLO si la llave general lo soporta
-<span class="fc bfc" id="L52" title="All 2 branches covered.">                    if ((potenciaEnUso + hab.potenciaKW()) &lt;= potenciaContratadaKW) {</span>
-<span class="fc" id="L53">                        ordenes.add(new Orden(hab.id(), AccionSwitch.ON));</span>
-<span class="fc" id="L54">                        potenciaEnUso += hab.potenciaKW(); // Ocupamos potencia</span>
+<span class="fc" id="L44">            }</span>
+<span class="fc" id="L45">            return new Salida(apagar);</span>
+        }
+
+<span class="fc" id="L48">        double potenciaEnUso = 0.0;</span>
+<span class="fc" id="L49">        List&lt;HabitacionDTO&gt; conFrio = new ArrayList&lt;&gt;();</span>
+
+<span class="fc bfc" id="L51" title="All 2 branches covered.">        for (HabitacionDTO hab : habitaciones) {</span>
+<span class="fc bfc" id="L52" title="All 2 branches covered.">            boolean necesitaCalor = hab.temperaturaActual() &lt; hab.temperaturaEsperada();</span>
+<span class="fc bfc" id="L53" title="All 2 branches covered.">            boolean superoObjetivo = hab.temperaturaActual() &gt;= hab.temperaturaEsperada() + HISTERESIS_C;</span>
+
+<span class="pc bpc" id="L55" title="1 of 4 branches missed.">            switch (hab.estadoActual()) {</span>
+                case ON -&gt; {
+<span class="fc bfc" id="L57" title="All 2 branches covered.">                    if (superoObjetivo) {</span>
+                        // REGLA 2: ya superó la temperatura esperada (más el margen): apagar y liberar potencia
+<span class="fc" id="L59">                        apagar.add(new Orden(hab.id(), AccionSwitch.OFF));</span>
+                    } else {
+<span class="fc" id="L61">                        potenciaEnUso += hab.potenciaKW();</span>
+                    }
+<span class="fc" id="L63">                }</span>
+                case OFF -&gt; {
+<span class="fc bfc" id="L65" title="All 2 branches covered.">                    if (necesitaCalor) {</span>
+<span class="fc" id="L66">                        conFrio.add(hab);</span>
+                    }
+                }
+                case DESCONOCIDO -&gt; {
+                    // Sin estado confiable se comanda siempre, para que el estado quede conocido
+<span class="fc bfc" id="L71" title="All 2 branches covered.">                    if (necesitaCalor) {</span>
+<span class="fc" id="L72">                        conFrio.add(hab);</span>
+                    } else {
+<span class="fc" id="L74">                        apagar.add(new Orden(hab.id(), AccionSwitch.OFF));</span>
                     }
                 }
             }
-<span class="fc" id="L58">        }</span>
+<span class="fc" id="L78">        }</span>
 
-<span class="fc" id="L60">        return new Salida(ordenes);</span>
+        // REGLA 3: encender las que tienen frío, primero la que está más lejos de su objetivo,
+        // solo si la potencia contratada lo soporta
+<span class="fc" id="L82">        conFrio.sort(Comparator.comparingDouble(</span>
+<span class="fc" id="L83">                (HabitacionDTO h) -&gt; h.temperaturaEsperada() - h.temperaturaActual()).reversed());</span>
+
+<span class="fc bfc" id="L85" title="All 2 branches covered.">        for (HabitacionDTO hab : conFrio) {</span>
+<span class="fc bfc" id="L86" title="All 2 branches covered.">            if (potenciaEnUso + hab.potenciaKW() &lt;= potenciaContratadaKW) {</span>
+<span class="fc" id="L87">                encender.add(new Orden(hab.id(), AccionSwitch.ON));</span>
+<span class="fc" id="L88">                potenciaEnUso += hab.potenciaKW();</span>
+<span class="fc bfc" id="L89" title="All 2 branches covered.">            } else if (hab.estadoActual() == EstadoSwitch.DESCONOCIDO) {</span>
+                // No entra en la potencia y podría estar encendido: se apaga para no superar el tope
+<span class="fc" id="L91">                apagar.add(new Orden(hab.id(), AccionSwitch.OFF));</span>
+            }
+<span class="fc" id="L93">        }</span>
+
+<span class="fc" id="L95">        List&lt;Orden&gt; ordenes = new ArrayList&lt;&gt;(apagar);</span>
+<span class="fc" id="L96">        ordenes.addAll(encender);</span>
+<span class="fc" id="L97">        return new Salida(ordenes);</span>
     }
 
     private boolean enTarifaPunta(ZonedDateTime fechaHora, TarifaPunta tarifa) {
-<span class="fc" id="L64">        LocalTime horaActual = fechaHora.toLocalTime();</span>
-<span class="fc" id="L65">        DayOfWeek diaActual = fechaHora.getDayOfWeek();</span>
-
-        // Si el día de hoy no está en la lista de días de la tarifa, nunca es punta
-<span class="fc bfc" id="L68" title="All 2 branches covered.">        if (!tarifa.dias().contains(diaActual)) {</span>
-<span class="fc" id="L69">            return false;</span>
+<span class="fc bfc" id="L101" title="All 2 branches covered.">        if (!tarifa.dias().contains(fechaHora.getDayOfWeek())) {</span>
+<span class="fc" id="L102">            return false;</span>
         }
 
-        // Verificamos si la hora cae dentro del rango semiabierto [desde, hasta)
-<span class="fc bfc" id="L73" title="All 4 branches covered.">        return !horaActual.isBefore(tarifa.desde()) &amp;&amp; horaActual.isBefore(tarifa.hasta());</span>
+<span class="fc" id="L105">        LocalTime horaActual = fechaHora.toLocalTime();</span>
+
+        // Si desde == hasta, la franja es vacía
+<span class="fc bfc" id="L108" title="All 2 branches covered.">        if (tarifa.desde().equals(tarifa.hasta())) {</span>
+<span class="fc" id="L109">            return false;</span>
+        }
+
+        // Rango normal en el mismo día [desde, hasta) (ej. 17:00 a 23:00)
+<span class="fc bfc" id="L113" title="All 2 branches covered.">        if (tarifa.desde().isBefore(tarifa.hasta())) {</span>
+<span class="fc bfc" id="L114" title="All 4 branches covered.">            return !horaActual.isBefore(tarifa.desde()) &amp;&amp; horaActual.isBefore(tarifa.hasta());</span>
+        }
+
+        // Rango nocturno que cruza medianoche (ej. 22:00 a 06:00)
+<span class="pc bpc" id="L118" title="3 of 4 branches missed.">        return !horaActual.isBefore(tarifa.desde()) || horaActual.isBefore(tarifa.hasta());</span>
     }
 }
 </pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.15.202606040825</span></div></body></html>

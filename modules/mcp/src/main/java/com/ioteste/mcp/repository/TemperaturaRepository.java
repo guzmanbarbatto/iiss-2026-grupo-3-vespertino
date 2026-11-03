@@ -4,6 +4,8 @@ import com.ioteste.mcp.client.ServicioExternoException;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -13,15 +15,20 @@ import org.springframework.stereotype.Repository;
 
 /**
  * Acceso de solo lectura al histórico de temperaturas que registra el engine a partir de los
- * mensajes MQTT de los termostatos (tabla {@code historico_temperatura}).
+ * mensajes MQTT de los termostatos (tabla {@code historico_temperatura}). La columna {@code fecha_hora}
+ * guarda UTC: se lee en UTC, sin depender de la zona horaria de la JVM.
  */
 @Repository
 public class TemperaturaRepository {
 
+    /** Última lectura por habitación con una búsqueda por índice, sin recorrer todo el histórico. */
     private static final String SQL_ULTIMAS = """
-            SELECT DISTINCT ON (habitacion_id) habitacion_id, fecha_hora, temperatura_c
-            FROM historico_temperatura
-            ORDER BY habitacion_id, fecha_hora DESC
+            SELECT h.id AS habitacion_id, ult.fecha_hora, ult.temperatura_c
+            FROM habitacion h
+            JOIN LATERAL (
+                SELECT fecha_hora, temperatura_c FROM historico_temperatura
+                WHERE habitacion_id = h.id ORDER BY fecha_hora DESC LIMIT 1
+            ) ult ON true
             """;
 
     private static final String SQL_HISTORIAL = """
@@ -64,7 +71,7 @@ public class TemperaturaRepository {
     private static Lectura mapear(ResultSet rs) throws SQLException {
         return new Lectura(
                 rs.getString("habitacion_id"),
-                rs.getTimestamp("fecha_hora").toInstant(),
+                rs.getObject("fecha_hora", LocalDateTime.class).toInstant(ZoneOffset.UTC),
                 rs.getDouble("temperatura_c"));
     }
 

@@ -2,7 +2,7 @@
 # ==============================================================================
 # Script: down.sh
 # Descripción: Detiene y elimina por completo los contenedores, redes y
-#              VOLÚMENES persistentes
+#              VOLÚMENES persistentes de este proyecto (no toca otros proyectos).
 # ==============================================================================
 
 echo "=========================================="
@@ -18,11 +18,8 @@ else
     exit 1
 fi
 
-echo "Destruyendo contenedores, redes y volúmenes..."
+echo "Destruyendo contenedores, redes y volúmenes del proyecto..."
 docker compose down -v
-
-echo "Purgando volúmenes huérfanos (limpieza profunda)..."
-docker volume prune -f
 
 echo "------------------------------------------"
 echo "✅ Infraestructura y base de datos destruidas desde cero."

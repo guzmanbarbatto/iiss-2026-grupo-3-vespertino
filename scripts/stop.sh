@@ -1,7 +1,7 @@
 #!/bin/bash
 # ==============================================================================
 # Script: stop.sh
-# Descripción: Detiene los contenedores en ejecución (broker y suscriptor Java)
+# Descripción: Detiene los contenedores en ejecución (base de datos, engine y MCP)
 #              sin destruirlos ni eliminar las redes creadas por Docker.
 # ==============================================================================
 
@@ -19,10 +19,10 @@ else
     exit 1
 fi
 
-echo "Pausando los contenedores (docker-compose stop)..."
+echo "Pausando los contenedores (docker compose stop)..."
 
 # Este comando detiene los servicios, pero mantiene sus estados y redes intactos
-docker-compose stop
+docker compose stop
 
 echo "------------------------------------------"
 echo "✅ Contenedores detenidos correctamente."

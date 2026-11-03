@@ -85,7 +85,7 @@ modules/mcp/
     │   │   ├── config/
     │   │   │   ├── HttpClientsConfiguration.java   # RestClient con timeouts (2s connect / 5s read)
     │   │   │   ├── McpToolsConfiguration.java      # MethodToolCallbackProvider (Spring AI)
-    │   │   │   └── SeguridadConfiguration.java     # CORS (Mcp-Session-Id) + X-API-Key
+    │   │   │   └── SeguridadConfiguration.java     # CORS (orígenes locales) + X-API-Key
     │   │   ├── repository/
     │   │   │   └── TemperaturaRepository.java      # Consultas SQL sobre historico_temperatura
     │   │   └── tools/
@@ -97,10 +97,11 @@ modules/mcp/
         └── java/com/ioteste/mcp/
             ├── McpServerContextTest.java           # Test de integración del servidor MCP y seguridad
             ├── client/ClientesHttpTest.java        # Tests con MockRestServiceServer
+            ├── repository/TemperaturaRepositoryTest.java # Consultas contra PostgreSQL real (Testcontainers)
             └── tools/EcoWarmToolsTest.java         # Tests unitarios de las 7 tools
 ```
 
-* **Generación de esquemas JSON:** El `pom.xml` compila con `<maven.compiler.parameters>true</maven.compiler.parameters>`, permitiendo que Spring AI inspeccione por reflexión los nombres reales de los parámetros (`habitacionId`, `encender`, `limite`, `fechaHora`, `factorTiempo`) y sus descripciones `@ToolParam`.
+* **Generación de esquemas JSON:** El `pom.xml` raíz compila con `-parameters` (`<parameters>true</parameters>` en `maven-compiler-plugin`), permitiendo que Spring AI inspeccione por reflexión los nombres reales de los parámetros (`habitacionId`, `encender`, `limite`, `fechaHora`, `factorTiempo`) y sus descripciones `@ToolParam`.
 
 ---
 
@@ -126,7 +127,7 @@ sequenceDiagram
     Agente->>MCP: POST /mcp/message (tools/call: consultarEstadoHabitaciones)
     MCP->>Engine: GET /sitio (X-API-Key)
     Engine-->>MCP: 200 OK (Inventario: sitio + habitaciones)
-    MCP->>DB: SELECT DISTINCT ON (habitacion_id) ... FROM historico_temperatura
+    MCP->>DB: SELECT ... JOIN LATERAL (última lectura por habitación, por índice)
     DB-->>MCP: Últimas lecturas MQTT
     MCP->>Sim: GET /switches/sw-room1..N (X-API-Key)
     Sim-->>MCP: Estado de cada switch (ON / OFF / DESCONOCIDO)

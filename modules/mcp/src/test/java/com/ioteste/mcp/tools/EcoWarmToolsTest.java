@@ -56,8 +56,10 @@ class EcoWarmToolsTest {
         Inventario inventario = new Inventario("2.0",
                 new Sitio("sitio-1", "Casa", 5.0, new Tarifa(new TarifaPunta("18:00", "22:00", "HABILES"))),
                 List.of(
-                        new Habitacion("hab-1", "Cuarto 1", 20.0, 2.0, "ht-1", "ht-1/status/temperature:0", "sw-1", "u"),
-                        new Habitacion("hab-2", "Cuarto 2", 22.0, 3.0, "ht-2", "ht-2/status/temperature:0", "sw-2", "u")));
+                        new Habitacion("hab-1", "Cuarto 1", 20.0, 2.0, "ht-1", "ht-1/status/temperature:0",
+                                "sw-1", "u"),
+                        new Habitacion("hab-2", "Cuarto 2", 22.0, 3.0, "ht-2", "ht-2/status/temperature:0",
+                                "sw-2", "u")));
         when(engineClient.obtenerSitio()).thenReturn(Optional.of(inventario));
         when(engineClient.obtenerControl()).thenReturn(new EstadoControl("DETENIDO", null, null, null));
     }
