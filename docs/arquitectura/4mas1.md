@@ -1,20 +1,20 @@
-# Modelo de Arquitectura 4+1: EcoWarm (Iteración 4)
+# Modelo de Arquitectura 4+1: EcoWarm 
 
 Este documento describe la arquitectura del sistema EcoWarm basándose en el modelo de vistas 4+1, haciendo especial énfasis en la **Vista Lógica** y en la separación estructural implementada en la Iteración 4.
 
-## Vista Lógica
+## 1. Vista Lógica
 
-La arquitectura del sistema se ha rediseñado para cumplir con un enfoque Multi-Módulo, aislando completamente las reglas del negocio de las responsabilidades de infraestructura (frameworks, bases de datos y comunicaciones).
+La arquitectura lógica de EcoWarm se organiza en dos módulos Maven: core y engine. Esta separación permite mantener las reglas de decisión del sistema aisladas de los mecanismos utilizados para obtener información, almacenar datos y ejecutar comandos sobre los dispositivos.
 
-El sistema se divide en dos grandes módulos independientes:
+### A. Módulo `core` 
+El módulo core contiene la lógica de negocio encargada de determinar cuándo deben encenderse o apagarse los switches asociados a las habitaciones.   
 
-### A. Módulo `core` (El Dominio Puro)
-* **Responsabilidad:** Contiene la lógica matemática, las reglas tarifarias y las decisiones de encendido/apagado (`EvaluadorCore`).
-* **Características:**
-  * Es una biblioteca de Java puro (Plain Old Java Objects).
-  * No tiene dependencias de Spring Boot, MQTT, bases de datos ni clientes web.
-  * Representa el estado del sistema mediante objetos de transferencia (DTOs) y registros inmutables.
-  * Altamente testeable mediante Desarrollo Guiado por Pruebas (TDD) y herramientas nativas como JUnit y Mockito.
+Su componente principal es EvaluadorCore, que recibe la hora de evaluación, la potencia eléctrica contratada, la configuración de la tarifa punta y una lista de habitaciones con sus temperaturas y estados actuales.  
+A partir de estos datos, aplica las siguientes reglas:
+  * **Tarifa punta:** ordena apagar los switches que estén encendidos durante el horario configurado.
+  * **Control de temperatura:** fuera de la tarifa punta, ordena apagar las habitaciones que alcanzaron la temperatura esperada y encender las que necesitan calor.
+  * **Límite de potencia:** antes de ordenar un encendido, comprueba que la potencia consumida más la requerida por la habitación no supere la potencia contratada.
+  * **Evitar comandos innecesarios:** no genera órdenes cuando el estado actual ya satisface la condición evaluada.
 
 ### B. Módulo `engine` (La Infraestructura / Adaptadores)
 * **Responsabilidad:** Actúa como el puente entre el mundo exterior (Internet, sensores, actuadores) y el cerebro del sistema (`core`).
