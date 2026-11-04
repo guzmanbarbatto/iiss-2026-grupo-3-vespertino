@@ -67,17 +67,21 @@ bash scripts/demo-10-habitaciones.sh         # levanta la demo y muestra el log 
 bash scripts/demo-10-habitaciones.sh tablero # en otra ventana: temperatura y estado de cada habitación en vivo
 ```
 
-Por defecto arranca el martes 27/10 a las 13:00 simuladas a ×60: se ven los turnos entre habitaciones y, unos 4 minutos reales después, la entrada de la tarifa punta (17:00). Se puede elegir otra hora y otro factor: `bash scripts/demo-10-habitaciones.sh 2026-10-27T08:00:00-03:00 30`.
+Una de las habitaciones (`room10`) publica en un topic fuera de la convención (`casa/estudio/temperatura`), algo válido según el estándar. Por defecto arranca el martes 27/10 a las 13:00 simuladas a ×60: se ven los turnos entre habitaciones y, unos 4 minutos reales después, la entrada de la tarifa punta (17:00). Se puede elegir otra hora y otro factor: `bash scripts/demo-10-habitaciones.sh 2026-10-27T08:00:00-03:00 30`.
 
 ## 🛡️ Resiliencia y Tolerancia a Fallos
 
 El sistema implementa un patrón **Fail-Safe** riguroso:
 
-* Si un termostato deja de emitir datos MQTT (sin lecturas en los últimos 10 minutos lógicos), el controlador apaga la calefacción de esa habitación por seguridad, pero **el ciclo general del motor continúa operando** para el resto de la casa.
+* Si un termostato deja de emitir datos MQTT (sin lecturas en los últimos 10 minutos simulados; con aceleración alta, cuando pierde 3 lecturas seguidas al ritmo que el engine midió para ese termostato), el controlador apaga la calefacción de esa habitación por seguridad, pero **el ciclo general del motor continúa operando** para el resto de la casa.
+
+* Si una habitación sale del inventario (`PUT /sitio`) con su calefacción encendida, el engine apaga su switch en el ciclo siguiente: no queda prendida sin control ni fuera de la cuenta de potencia. El pendiente se guarda en la base, así que sobrevive a un reinicio del engine.
 
 * El estado de cada switch se consulta al simulador en cada ciclo: un cambio hecho desde afuera (MCP, consola del simulador) se detecta y se corrige. Un switch que no responde o está `DESCONOCIDO` se comanda explícitamente, sin suponer su estado.
 
-* Si se corta el broker MQTT, el engine se reconecta y **vuelve a suscribirse** solo. Si el simulador se reinicia y olvida el registro, el engine se registra de nuevo (lo verifica cada minuto).
+* El engine se suscribe **exactamente a los topics que declara el inventario** (aunque no sigan la convención `<idTermostato>/status/temperature:0`) y ajusta la suscripción en cada `PUT /sitio`. Si se corta el broker MQTT, se reconecta y **vuelve a suscribirse** solo. Si el simulador se reinicia y olvida el registro, el engine se registra de nuevo (lo verifica cada minuto).
+
+* Durante una falla (simulador, base de datos o broker caídos) el log avisa **una vez** cuando empieza y otra cuando se recupera, en lugar de repetir el aviso en cada ciclo.
 
 * Una lectura que oscila alrededor del objetivo no hace titilar el relé: se apaga recién al superar la temperatura esperada por 0,5 °C (histéresis).
 
@@ -90,7 +94,7 @@ El proyecto incluye un servidor **Model Context Protocol (MCP)** sobre HTTP + SS
 
 ## 🧪 Calidad y Testing
 
-* **Tests Unitarios y de Integración:** El proyecto cuenta con **133 tests automatizados** (`mvn verify`): 23 en `core` (`EvaluadorCoreTest`), 83 en `engine` (ciclo de control, API REST contra el contrato, validación del inventario, MQTT, registro y repositorios contra PostgreSQL real) y 27 en `mcp`. Los tests de repositorios usan Testcontainers: necesitan Docker y, sin él (por ejemplo dentro de `docker build`), se omiten. El detalle está en [`/docs/tests/criterio-tests.md`](docs/tests/criterio-tests.md).
+* **Tests Unitarios y de Integración:** El proyecto cuenta con **165 tests automatizados** (`mvn verify`): 23 en `core` (`EvaluadorCoreTest`), 115 en `engine` (ciclo de control, comportamiento ante fallas, API REST contra el contrato, validación del inventario, MQTT, registro y repositorios contra PostgreSQL real) y 27 en `mcp`. Los tests de repositorios usan Testcontainers: necesitan Docker y, sin él (por ejemplo dentro de `docker build`), se omiten. El detalle está en [`/docs/tests/criterio-tests.md`](docs/tests/criterio-tests.md).
 
 * **Cobertura (JaCoCo):** El módulo `core` posee un nivel de cobertura de pruebas superior al **85%**. El reporte HTML interactivo se encuentra disponible en `/docs/calidad/cobertura/index.html`.
 

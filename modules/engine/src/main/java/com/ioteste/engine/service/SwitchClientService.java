@@ -12,6 +12,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestTemplate;
 
@@ -31,6 +32,7 @@ public class SwitchClientService {
     private final RestTemplate restTemplate;
     private final String simuladorUrl;
     private final String simuladorApiKey;
+    private final FallasActivas fallas = new FallasActivas();
 
     @Autowired
     public SwitchClientService(
@@ -55,6 +57,7 @@ public class SwitchClientService {
             RespuestaEstadoSwitch respuesta = restTemplate.exchange(
                     simuladorUrl + "/switches/{id}", HttpMethod.GET, new HttpEntity<>(cabeceras()),
                     RespuestaEstadoSwitch.class, idSwitch).getBody();
+            respondio(idSwitch);
             String estado = respuesta == null ? null : respuesta.estado();
             if ("ON".equals(estado)) {
                 return EstadoSwitch.ON;
@@ -64,20 +67,43 @@ public class SwitchClientService {
             }
             return EstadoSwitch.DESCONOCIDO;
         } catch (RestClientException e) {
-            LOG.warn("No se pudo consultar el switch {}: {}", idSwitch, e.getMessage());
+            noRespondio(idSwitch, "consultar el", e);
             return EstadoSwitch.DESCONOCIDO;
         }
     }
 
+    /** Resultado de un comando: el simulador lo aplicó, el switch no existe (404) o no se pudo enviar. */
+    public enum Resultado { APLICADO, INEXISTENTE, FALLIDO }
+
     /** Envía ON u OFF al switch. Nunca lanza: una falla en un switch no debe frenar el ciclo de control. */
-    public boolean comandarSwitch(String idSwitch, String accion) {
+    public Resultado comandarSwitch(String idSwitch, String accion) {
         try {
             restTemplate.exchange(simuladorUrl + "/switches/{id}/comandos", HttpMethod.POST,
                     new HttpEntity<>(new ComandoSwitch(accion), cabeceras()), String.class, idSwitch);
-            return true;
+            respondio(idSwitch);
+            return Resultado.APLICADO;
+        } catch (HttpClientErrorException.NotFound e) {
+            noRespondio(idSwitch, "enviar " + accion + " al", e);
+            return Resultado.INEXISTENTE;
         } catch (RestClientException e) {
-            LOG.warn("No se pudo enviar {} al switch {}: {}", accion, idSwitch, e.getMessage());
-            return false;
+            noRespondio(idSwitch, "enviar " + accion + " al", e);
+            return Resultado.FALLIDO;
+        }
+    }
+
+    /** Avisa una vez cuando el switch deja de responder; mientras siga caído, el detalle queda en DEBUG. */
+    private void noRespondio(String idSwitch, String operacion, RestClientException e) {
+        if (fallas.empezo(idSwitch)) {
+            LOG.warn("No se pudo {} switch {}: {} (se reintenta en cada ciclo; se avisará cuando responda)",
+                    operacion, idSwitch, e.getMessage());
+        } else {
+            LOG.debug("El switch {} sigue sin responder: {}", idSwitch, e.getMessage());
+        }
+    }
+
+    private void respondio(String idSwitch) {
+        if (fallas.termino(idSwitch)) {
+            LOG.info("El switch {} vuelve a responder", idSwitch);
         }
     }
 

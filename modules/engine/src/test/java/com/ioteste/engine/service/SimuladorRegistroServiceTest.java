@@ -1,5 +1,6 @@
 package com.ioteste.engine.service;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
@@ -20,6 +21,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
@@ -129,6 +132,23 @@ class SimuladorRegistroServiceTest {
         registro.mantenerRegistro();
 
         simulador.verify();
+    }
+
+    @Test
+    @ExtendWith(OutputCaptureExtension.class)
+    void mientrasElSimuladorNoRespondeSeAvisaUnaSolaVez(CapturedOutput salida) {
+        for (int i = 0; i < 3; i++) {
+            simulador.expect(requestTo(CONTROLADORES)).andRespond(withStatus(HttpStatus.SERVICE_UNAVAILABLE));
+        }
+        esperarRegistro();
+
+        for (int i = 0; i < 4; i++) {
+            registro.mantenerRegistro();
+        }
+
+        simulador.verify();
+        assertThat(salida.getOut().split("El simulador no responde", -1)).hasSize(2);
+        assertThat(salida.getOut()).contains("El simulador vuelve a responder");
     }
 
     private void esperarRegistro() {

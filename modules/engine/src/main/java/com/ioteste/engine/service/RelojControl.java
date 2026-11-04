@@ -40,12 +40,18 @@ public class RelojControl {
 
     /** Hora lógica actual, en hora local del sitio. Detenido, es la hora del sistema. */
     public ZonedDateTime ahora() {
-        return aLogico(clock.instant());
+        return aLogico(sincronizacion, clock.instant());
     }
 
-    /** Lleva un instante del reloj real al reloj lógico. Detenido, lo devuelve sin cambios. */
-    public ZonedDateTime aLogico(Instant real) {
-        return aLogico(sincronizacion, real);
+    /** Instante real (del sistema). */
+    public Instant ahoraReal() {
+        return clock.instant();
+    }
+
+    /** Cuánto tiempo real equivale a una duración lógica con el factor vigente. Detenido, es la misma. */
+    public Duration aTiempoReal(Duration logica) {
+        Sincronizacion s = sincronizacion;
+        return s == null ? logica : Duration.ofMillis((long) (logica.toMillis() / s.factor()));
     }
 
     /** Estado del control según el contrato: detenido ⇒ todos los campos opcionales en {@code null}. */

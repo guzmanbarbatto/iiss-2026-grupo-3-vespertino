@@ -1,6 +1,6 @@
 #!/bin/bash
 
-echo "🚀 Construyendo la infraestructura de EcoWarm (Iteración 5)..."
+echo "🚀 Construyendo la infraestructura de EcoWarm (Iteración 6)..."
 
 # El docker-compose ya sabe dónde está el Dockerfile. 
 # Al ejecutar esto, Maven va a compilar el core, correr los tests TDD, y armar la imagen del engine.

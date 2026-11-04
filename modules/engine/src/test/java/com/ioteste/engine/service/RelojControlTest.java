@@ -34,10 +34,13 @@ class RelojControlTest {
     }
 
     @Test
-    void convierteInstantesRealesAlRelojLogico() {
+    void llevaDuracionesSimuladasATiempoReal() {
+        assertThat(reloj.aTiempoReal(Duration.ofMinutes(10))).isEqualTo(Duration.ofMinutes(10));
+
         reloj.sincronizar(LOGICO, 60.0);
 
-        assertThat(reloj.aLogico(REAL.plusSeconds(1)).toInstant()).isEqualTo(LOGICO.plusSeconds(60));
+        assertThat(reloj.aTiempoReal(Duration.ofMinutes(10))).isEqualTo(Duration.ofSeconds(10));
+        assertThat(reloj.ahoraReal()).isEqualTo(REAL);
     }
 
     @Test

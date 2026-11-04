@@ -14,6 +14,7 @@ import com.ioteste.engine.domain.InventarioDTO;
 import com.ioteste.engine.repository.HistoricoRepository;
 import com.ioteste.engine.repository.HistoricoRepository.Lectura;
 import com.ioteste.engine.repository.SitioRepository;
+import com.ioteste.engine.service.SwitchClientService.Resultado;
 import java.math.BigDecimal;
 import java.time.DayOfWeek;
 import java.time.Duration;
@@ -22,6 +23,7 @@ import java.time.LocalTime;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -44,8 +46,19 @@ public class EvaluadorJobService {
 
     static final long INTERVALO_LOGICO_MS = 30_000;
     static final long INTERVALO_MINIMO_REAL_MS = 500;
-    /** Una lectura más vieja que esto (en tiempo lógico) se considera un termostato caído. */
-    static final long LECTURA_VENCIDA_SEGUNDOS = 600;
+    /** Sin lecturas durante este tiempo simulado, el termostato se considera caído. */
+    static final Duration LECTURA_VENCIDA = Duration.ofSeconds(600);
+    /**
+     * Un termostato nunca se da por caído antes de perder esta cantidad de lecturas seguidas. Con aceleración
+     * alta, 600 s simulados pueden durar menos que lo que el termostato tarda en volver a publicar (el de la
+     * cátedra publica cada 5 s reales; con ×600, 600 s simulados son 1 s real) y cada lectura llegaría
+     * "vencida". El ritmo de cada termostato se mide de sus últimas lecturas: no se supone ninguno.
+     */
+    static final int LECTURAS_PERDIDAS = 3;
+    /** Ritmo que se supone mientras un termostato tiene una sola lectura y todavía no se puede medir. */
+    static final Duration RITMO_SUPUESTO = Duration.ofSeconds(10);
+    /** Piso absoluto: un termostato que publica muy seguido no entra al fail-safe por una demora mínima. */
+    static final Duration SILENCIO_MINIMO_REAL = Duration.ofSeconds(2);
     /** Temperatura que se asume sin lecturas válidas: fuerza el apagado (fail-safe). */
     static final double TEMPERATURA_FAIL_SAFE = 99.0;
     private static final DateTimeFormatter DIA_HORA = DateTimeFormatter.ofPattern("dd/MM HH:mm");
@@ -58,8 +71,11 @@ public class EvaluadorJobService {
     private final TaskScheduler scheduler;
     private final EvaluadorCore evaluadorCore = new EvaluadorCore();
 
+    private static final String FALLA_CICLO = "ciclo";
+    private static final String FALLA_SIN_SITIO = "sin-sitio";
+
     private ScheduledFuture<?> tareaProgramada;
-    private volatile boolean avisoSinSitioDado;
+    private final FallasActivas fallas = new FallasActivas();
     private volatile List<String> ultimoSinLecturas = List.of();
 
     public EvaluadorJobService(
@@ -102,19 +118,51 @@ public class EvaluadorJobService {
     /** Un ciclo de control. Nunca lanza: una excepción cancelaría las ejecuciones siguientes del scheduler. */
     public void ejecutarCicloDeControl() {
         try {
-            Optional<InventarioDTO> inventario = sitioRepository.obtenerInventario();
-            if (inventario.isEmpty()) {
-                // Se avisa una sola vez, no en cada ciclo (con factor alto serían varias líneas por segundo)
-                if (!avisoSinSitioDado) {
-                    LOG.warn("No hay un sitio cargado: el control espera el PUT /sitio del simulador");
-                    avisoSinSitioDado = true;
-                }
-                return;
+            ciclo();
+            if (fallas.termino(FALLA_CICLO)) {
+                LOG.info("El ciclo de control vuelve a funcionar");
             }
-            avisoSinSitioDado = false;
-            evaluar(inventario.get(), reloj.ahora());
         } catch (RuntimeException e) {
-            LOG.error("Error en el ciclo de control: {}", e.getMessage(), e);
+            if (fallas.empezo(FALLA_CICLO)) {
+                LOG.error("Error en el ciclo de control (se reintenta en cada ciclo; "
+                        + "se avisará cuando se recupere): {}", e.getMessage(), e);
+            } else {
+                LOG.debug("El ciclo de control sigue fallando: {}", e.getMessage());
+            }
+        }
+    }
+
+    private void ciclo() {
+        Optional<InventarioDTO> inventario = sitioRepository.obtenerInventario();
+        ZonedDateTime ahora = reloj.ahora();
+        apagarSwitchesRetirados(ahora);
+        if (inventario.isEmpty()) {
+            if (fallas.empezo(FALLA_SIN_SITIO)) {
+                LOG.warn("No hay un sitio cargado: el control espera el PUT /sitio del simulador");
+            }
+            return;
+        }
+        fallas.termino(FALLA_SIN_SITIO);
+        evaluar(inventario.get(), ahora);
+    }
+
+    /**
+     * Apaga los switches de las habitaciones que salieron del inventario: si no, seguirían encendidos sin que
+     * nadie los controle y fuera de la cuenta de potencia. Los pendientes están en la base (los anota el
+     * {@code PUT /sitio}), así que sobreviven a un reinicio del engine. Se reintenta en cada ciclo hasta
+     * lograrlo; si el switch ya no existe en el simulador, no hay nada que apagar.
+     */
+    private void apagarSwitchesRetirados(ZonedDateTime ahora) {
+        for (String idSwitch : sitioRepository.switchesPendientesDeApagar()) {
+            Resultado resultado = switchClient.comandarSwitch(idSwitch, AccionSwitch.OFF.name());
+            if (resultado == Resultado.APLICADO) {
+                sitioRepository.quitarPendienteDeApagar(idSwitch);
+                LOG.info("[simulado {}] {} → OFF (su habitación ya no está en el inventario)",
+                        horaSimulada(ahora), idSwitch);
+            } else if (resultado == Resultado.INEXISTENTE) {
+                sitioRepository.quitarPendienteDeApagar(idSwitch);
+                LOG.info("{} salió del inventario y no existe en el simulador: no hay nada que apagar", idSwitch);
+            }
         }
     }
 
@@ -126,7 +174,7 @@ public class EvaluadorJobService {
 
         for (Habitacion hab : inventario.habitaciones()) {
             switchPorHabitacion.put(hab.id(), hab.idSwitch());
-            Double temperatura = temperaturaVigente(lecturas.get(hab.id()), ahora);
+            Double temperatura = temperaturaVigente(lecturas.get(hab.id()));
             if (temperatura == null) {
                 sinLecturasVigentes.add(hab.id());
                 temperatura = TEMPERATURA_FAIL_SAFE;
@@ -148,7 +196,8 @@ public class EvaluadorJobService {
         habitaciones.forEach(h -> estadoFinal.put(h.id(), h.estadoActual()));
         List<String> cambios = new ArrayList<>();
         for (Orden orden : salida.ordenes()) {
-            if (switchClient.comandarSwitch(switchPorHabitacion.get(orden.idHabitacion()), orden.accion().name())) {
+            String idSwitch = switchPorHabitacion.get(orden.idHabitacion());
+            if (switchClient.comandarSwitch(idSwitch, orden.accion().name()) == Resultado.APLICADO) {
                 cambios.add(orden.idHabitacion() + " → " + orden.accion());
                 estadoFinal.put(orden.idHabitacion(),
                         orden.accion() == AccionSwitch.ON ? EstadoSwitch.ON : EstadoSwitch.OFF);
@@ -202,22 +251,32 @@ public class EvaluadorJobService {
     }
 
     /**
-     * Temperatura de la última lectura, o {@code null} si no hay o está vencida.
+     * Temperatura de la última lectura, o {@code null} si no hay o el termostato está callado hace demasiado.
      *
-     * <p>El {@code ts} del termostato puede venir en el reloj virtual del simulador o en el real: se compara
-     * contra la hora lógica de las dos formas y alcanza con que una la considere reciente.
+     * <p>Se mide cuánto tiempo real pasó desde que llegó la lectura, no su {@code ts}: así no importa en qué
+     * reloj venga el {@code ts}. El límite está en {@link #silencioMaximo(Duration)}.
      */
-    private Double temperaturaVigente(Lectura lectura, ZonedDateTime ahora) {
+    private Double temperaturaVigente(Lectura lectura) {
         if (lectura == null) {
             return null;
         }
-        long antiguedadLogica = Math.abs(Duration.between(lectura.fechaHora(), ahora.toInstant()).getSeconds());
-        long antiguedadReal = Math.abs(Duration.between(
-                reloj.aLogico(lectura.fechaHora()).toInstant(), ahora.toInstant()).getSeconds());
-        if (Math.min(antiguedadLogica, antiguedadReal) > LECTURA_VENCIDA_SEGUNDOS) {
+        Duration silencio = Duration.between(lectura.recibidaEn(), reloj.ahoraReal());
+        if (silencio.compareTo(silencioMaximo(lectura.ritmo())) > 0) {
             return null;
         }
         return lectura.temperaturaC();
+    }
+
+    /**
+     * Cuánto tiempo real puede callar un termostato que publica cada {@code ritmo} antes de darlo por caído: lo
+     * mayor entre {@link #LECTURA_VENCIDA} simulados llevados a tiempo real y {@link #LECTURAS_PERDIDAS}
+     * lecturas perdidas, con un piso de {@link #SILENCIO_MINIMO_REAL}. Antes de detectar la falta de una
+     * lectura hay que esperar a que le toque llegar: con aceleración alta, esa espera manda.
+     */
+    Duration silencioMaximo(Duration ritmo) {
+        Duration porLecturasPerdidas = (ritmo != null ? ritmo : RITMO_SUPUESTO).multipliedBy(LECTURAS_PERDIDAS);
+        return Collections.max(List.of(reloj.aTiempoReal(LECTURA_VENCIDA), porLecturasPerdidas,
+                SILENCIO_MINIMO_REAL));
     }
 
     static TarifaPunta tarifaPunta(Franja franja) {

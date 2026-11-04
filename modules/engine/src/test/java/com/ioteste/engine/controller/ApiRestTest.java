@@ -1,8 +1,10 @@
 package com.ioteste.engine.controller;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -17,12 +19,14 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ioteste.engine.domain.EstadoControl;
 import com.ioteste.engine.domain.InventarioDTO;
+import com.ioteste.engine.domain.InventarioReemplazado;
 import com.ioteste.engine.repository.SitioRepository;
 import com.ioteste.engine.service.EvaluadorJobService;
 import com.ioteste.engine.service.ValidadorInventario;
 import java.time.Instant;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
+import org.mockito.InOrder;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.context.annotation.Import;
@@ -30,6 +34,8 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.CannotGetJdbcConnectionException;
 import org.springframework.test.context.TestPropertySource;
+import org.springframework.test.context.event.ApplicationEvents;
+import org.springframework.test.context.event.RecordApplicationEvents;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.json.JsonCompareMode;
 import org.springframework.test.web.servlet.MockMvc;
@@ -40,6 +46,7 @@ import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilde
 @WebMvcTest(controllers = {SitioController.class, ControlController.class})
 @Import(ValidadorInventario.class)
 @TestPropertySource(properties = "app.api.key=clave-test")
+@RecordApplicationEvents
 class ApiRestTest {
 
     private static final String INVENTARIO = """
@@ -60,6 +67,7 @@ class ApiRestTest {
 
     @Autowired private MockMvc mvc;
     @Autowired private ObjectMapper objectMapper;
+    @Autowired private ApplicationEvents eventos;
     @MockitoBean private SitioRepository repository;
     @MockitoBean private EvaluadorJobService motor;
 
@@ -112,6 +120,23 @@ class ApiRestTest {
     }
 
     @Test
+    void putSitioAvisaQueElInventarioCambioConElAnteriorYElNuevo() throws Exception {
+        InventarioDTO anterior = objectMapper.readValue(INVENTARIO, InventarioDTO.class);
+        when(repository.obtenerInventario()).thenReturn(Optional.of(anterior));
+
+        mvc.perform(conClave(put("/sitio")).contentType(MediaType.APPLICATION_JSON).content(INVENTARIO))
+                .andExpect(status().isOk());
+
+        InOrder orden = inOrder(repository);
+        orden.verify(repository).obtenerInventario();
+        orden.verify(repository).guardarInventario(any(InventarioDTO.class));
+        assertThat(eventos.stream(InventarioReemplazado.class)).singleElement().satisfies(evento -> {
+            assertThat(evento.anterior()).contains(anterior);
+            assertThat(evento.nuevo().sitio().id()).isEqualTo("casa-rodriguez");
+        });
+    }
+
+    @Test
     void putSitioInvalidoResponde400ConTodosLosErroresYNoTocaLaBase() throws Exception {
         String invalido = INVENTARIO.replace("\"desde\":\"17:00\"", "\"desde\":\"25:00\"")
                 .replace("\"idSwitch\":\"sw-sim-room2\"", "\"idSwitch\":\"sw-sim-room1\"");
@@ -123,6 +148,7 @@ class ApiRestTest {
                 .andExpect(jsonPath("$.errores[0]").value("tarifa.punta.desde debe tener formato HH:mm, es '25:00'"))
                 .andExpect(jsonPath("$.errores[1]").value("idSwitch duplicado: 'sw-sim-room1'"));
         verify(repository, never()).guardarInventario(any());
+        assertThat(eventos.stream(InventarioReemplazado.class)).isEmpty();
     }
 
     @Test

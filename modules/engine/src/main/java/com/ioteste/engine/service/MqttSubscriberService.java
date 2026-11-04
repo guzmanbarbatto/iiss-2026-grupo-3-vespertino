@@ -2,14 +2,26 @@ package com.ioteste.engine.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ioteste.engine.domain.ControladorRegistrado.BrokerMqtt;
+import com.ioteste.engine.domain.Habitacion;
+import com.ioteste.engine.domain.InventarioDTO;
+import com.ioteste.engine.domain.InventarioReemplazado;
 import com.ioteste.engine.domain.MensajeTermostato;
 import com.ioteste.engine.repository.HistoricoRepository;
+import com.ioteste.engine.repository.SitioRepository;
 import java.io.IOException;
 import java.time.Clock;
 import java.time.Instant;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.LinkedHashSet;
+import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.stream.Collectors;
+import org.eclipse.paho.client.mqttv3.IMqttActionListener;
 import org.eclipse.paho.client.mqttv3.IMqttAsyncClient;
 import org.eclipse.paho.client.mqttv3.IMqttDeliveryToken;
+import org.eclipse.paho.client.mqttv3.IMqttToken;
 import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
 import org.eclipse.paho.client.mqttv3.MqttCallbackExtended;
 import org.eclipse.paho.client.mqttv3.MqttConnectOptions;
@@ -26,6 +38,10 @@ import org.springframework.stereotype.Service;
 /**
  * Recibe las temperaturas de los termostatos por MQTT (§2) y las guarda en el histórico.
  *
+ * <p>Se suscribe exactamente a los {@code topicTermostato} que declara el inventario: el estándar dice que
+ * "el topic declarado es el que vale", así que no se asume ningún formato. La suscripción se ajusta en
+ * cada conexión y en cada {@code PUT /sitio}.
+ *
  * <p>El broker es el que anuncia el simulador al registrarnos (§6). {@code MQTT_BROKER_URL} lo reemplaza
  * cuando el nombre anunciado no es alcanzable desde la red Docker de este proyecto.
  */
@@ -34,21 +50,29 @@ public class MqttSubscriberService {
 
     private static final Logger LOG = LoggerFactory.getLogger(MqttSubscriberService.class);
 
-    static final String TOPICO_TEMPERATURAS = "+/status/temperature:0";
     private static final long REINTENTO_MS = 5_000;
+    private static final int QOS = 1;
 
     private final HistoricoRepository historico;
+    private final SitioRepository sitioRepository;
     private final ObjectMapper objectMapper;
     private final Clock clock;
     private final String brokerConfigurado;
     private final AtomicBoolean conexionIniciada = new AtomicBoolean(false);
 
+    // Estado de la suscripción: se accede solo desde métodos synchronized
+    private IMqttAsyncClient conectado;
+    private Set<String> declarados = Set.of();
+    private final Set<String> suscriptos = new LinkedHashSet<>();
+
     public MqttSubscriberService(
             HistoricoRepository historico,
+            SitioRepository sitioRepository,
             ObjectMapper objectMapper,
             Clock clock,
             @Value("${mqtt.broker.url}") String brokerConfigurado) {
         this.historico = historico;
+        this.sitioRepository = sitioRepository;
         this.objectMapper = objectMapper;
         this.clock = clock;
         this.brokerConfigurado = brokerConfigurado;
@@ -70,6 +94,13 @@ public class MqttSubscriberService {
         }
     }
 
+    /** Un inventario nuevo puede traer topics nuevos y dejar otros sin uso. */
+    @EventListener
+    public synchronized void inventarioReemplazado(InventarioReemplazado evento) {
+        declarados = topicsDe(Optional.of(evento.nuevo()));
+        sincronizarSuscripciones();
+    }
+
     private void conectarEnSegundoPlano(String url) {
         if (!conexionIniciada.compareAndSet(false, true)) {
             return;
@@ -84,6 +115,7 @@ public class MqttSubscriberService {
      * automática de Paho, y {@link Suscripcion#connectComplete} vuelve a suscribir cada vez.
      */
     private void conectar(String url) {
+        boolean avisado = false;
         while (!Thread.currentThread().isInterrupted()) {
             MqttAsyncClient cliente = null;
             try {
@@ -96,8 +128,13 @@ public class MqttSubscriberService {
                 return;
             } catch (MqttException e) {
                 cerrar(cliente);
-                LOG.warn("Broker MQTT {} no disponible ({}). Reintentando en {} s...",
-                        url, e.getMessage(), REINTENTO_MS / 1000);
+                if (!avisado) {
+                    LOG.warn("Broker MQTT {} no disponible ({}). Se reintenta cada {} s",
+                            url, e.getMessage(), REINTENTO_MS / 1000);
+                    avisado = true;
+                } else {
+                    LOG.debug("Broker MQTT {} sigue sin responder: {}", url, e.getMessage());
+                }
                 try {
                     Thread.sleep(REINTENTO_MS);
                 } catch (InterruptedException ie) {
@@ -125,6 +162,75 @@ public class MqttSubscriberService {
         }
     }
 
+    /**
+     * Con {@code cleanSession=true} el broker olvida las suscripciones al cortarse la conexión, y la
+     * reconexión automática de Paho no las restaura: en cada conexión se vuelve a suscribir a todo.
+     */
+    synchronized void alConectarse(IMqttAsyncClient cliente, boolean reconexion, String broker) {
+        conectado = cliente;
+        suscriptos.clear();
+        LOG.info("{} al broker MQTT {}", reconexion ? "Reconectado" : "Conectado", broker);
+        try {
+            declarados = topicsDe(sitioRepository.obtenerInventario());
+        } catch (RuntimeException e) {
+            LOG.warn("No se pudo leer el inventario para suscribirse ({}); se usan los últimos topics conocidos",
+                    e.getMessage());
+        }
+        if (declarados.isEmpty()) {
+            LOG.info("Todavía no hay un sitio cargado: la suscripción se hará al recibir el PUT /sitio");
+        }
+        sincronizarSuscripciones();
+    }
+
+    /** Lleva las suscripciones del broker a los topics declarados: agrega los que faltan y quita los que sobran. */
+    private void sincronizarSuscripciones() {
+        if (conectado == null || !conectado.isConnected()) {
+            return; // se hará al conectarse
+        }
+        Set<String> sobran = new LinkedHashSet<>(suscriptos);
+        sobran.removeAll(declarados);
+        Set<String> faltan = new LinkedHashSet<>(declarados);
+        faltan.removeAll(suscriptos);
+        try {
+            if (!sobran.isEmpty()) {
+                conectado.unsubscribe(sobran.toArray(String[]::new), null, avisarSiFalla("dejar de escuchar"));
+                suscriptos.removeAll(sobran);
+                LOG.info("MQTT: deja de escuchar {} (ya no están en el inventario)", termostatos(sobran));
+            }
+            if (!faltan.isEmpty()) {
+                int[] qos = new int[faltan.size()];
+                Arrays.fill(qos, QOS);
+                conectado.subscribe(faltan.toArray(String[]::new), qos, null, avisarSiFalla("suscribirse a"));
+                suscriptos.addAll(faltan);
+                LOG.info("MQTT: suscripto a {}", termostatos(faltan));
+            }
+        } catch (MqttException e) {
+            LOG.error("No se pudo actualizar la suscripción MQTT: {}", e.getMessage());
+        }
+    }
+
+    private static IMqttActionListener avisarSiFalla(String operacion) {
+        return new IMqttActionListener() {
+            @Override
+            public void onSuccess(IMqttToken token) {
+                // Nada que avisar
+            }
+
+            @Override
+            public void onFailure(IMqttToken token, Throwable causa) {
+                LOG.error("El broker rechazó {} {}: {}", operacion,
+                        Arrays.toString(token.getTopics()), causa.getMessage());
+            }
+        };
+    }
+
+    private static Set<String> topicsDe(Optional<InventarioDTO> inventario) {
+        return inventario.<Set<String>>map(i -> i.habitaciones().stream()
+                        .map(Habitacion::topicTermostato)
+                        .collect(Collectors.toCollection(LinkedHashSet::new)))
+                .orElse(Set.of());
+    }
+
     /** Guarda la lectura de un mensaje. Nunca lanza: un mensaje inválido no debe cortar la suscripción. */
     void procesar(String topic, byte[] payload) {
         try {
@@ -133,10 +239,11 @@ public class MqttSubscriberService {
                 LOG.warn("Mensaje de {} sin tC: se descarta", topic);
                 return;
             }
-            Instant fechaHora = mensaje.ts() != null && mensaje.ts() > 0
+            Instant recibidaEn = clock.instant();
+            Instant medidaEn = mensaje.ts() != null && mensaje.ts() > 0
                     ? Instant.ofEpochMilli(Math.round(mensaje.ts() * 1000))
-                    : clock.instant();
-            if (historico.registrar(topic, fechaHora, mensaje.tC()) > 0) {
+                    : recibidaEn;
+            if (historico.registrar(topic, medidaEn, recibidaEn, mensaje.tC()) > 0) {
                 LOG.info("Temperatura {}: {} °C", termostato(topic), mensaje.tC());
             } else {
                 LOG.debug("El topic {} no corresponde a ninguna habitación", topic);
@@ -148,16 +255,20 @@ public class MqttSubscriberService {
         }
     }
 
-    /** Id del termostato a partir de su topic ({@code ht-room1/status/temperature:0} → {@code ht-room1}). */
+    /**
+     * Nombre corto para el log: el id del termostato si el topic sigue la convención
+     * ({@code ht-room1/status/temperature:0} → {@code ht-room1}); si no, el topic completo.
+     */
     static String termostato(String topic) {
-        int barra = topic.indexOf('/');
-        return barra > 0 ? topic.substring(0, barra) : topic;
+        int convencion = topic.indexOf("/status/");
+        return convencion > 0 ? topic.substring(0, convencion) : topic;
     }
 
-    /**
-     * Callback de un cliente. Con {@code cleanSession=true} el broker olvida las suscripciones al cortarse
-     * la conexión, y la reconexión automática de Paho no las restaura: hay que suscribir en cada conexión.
-     */
+    private static String termostatos(Collection<String> topics) {
+        return topics.stream().map(MqttSubscriberService::termostato).collect(Collectors.joining(", "));
+    }
+
+    /** Callback de un cliente MQTT. */
     final class Suscripcion implements MqttCallbackExtended {
 
         private final IMqttAsyncClient cliente;
@@ -168,13 +279,7 @@ public class MqttSubscriberService {
 
         @Override
         public void connectComplete(boolean reconexion, String broker) {
-            try {
-                cliente.subscribe(TOPICO_TEMPERATURAS, 1);
-                LOG.info("{} al broker MQTT {} y suscripto a {}",
-                        reconexion ? "Reconectado" : "Conectado", broker, TOPICO_TEMPERATURAS);
-            } catch (MqttException e) {
-                LOG.error("No se pudo suscribir a {} en {}: {}", TOPICO_TEMPERATURAS, broker, e.getMessage());
-            }
+            alConectarse(cliente, reconexion, broker);
         }
 
         @Override

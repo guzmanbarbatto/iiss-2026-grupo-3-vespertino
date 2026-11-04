@@ -51,12 +51,24 @@ public class SitioRepository {
      * Reemplaza el inventario en una sola transacción. Es un upsert, no un borrado total: borrar las
      * habitaciones arrastraría en cascada su histórico de temperaturas y dejaría al motor sin lecturas.
      * Solo se eliminan el sitio anterior (si cambió de id) y las habitaciones que ya no vienen.
+     *
+     * <p>En la misma transacción se anotan los switches de las habitaciones que salen, para que el motor los
+     * apague aunque el engine se reinicie antes de lograrlo; y los que vuelven al inventario dejan de estar
+     * pendientes, porque el motor los controla de nuevo.
      */
     @Transactional
     public void guardarInventario(InventarioDTO inventario) {
         Sitio sitio = inventario.sitio();
         Franja punta = sitio.tarifa().punta();
         List<Habitacion> habitaciones = inventario.habitaciones();
+
+        String[] switchesVigentes = habitaciones.stream().map(Habitacion::idSwitch).toArray(String[]::new);
+        conArray("""
+                INSERT INTO switch_pendiente_apagado (id_switch)
+                SELECT id_switch FROM habitacion WHERE NOT (id_switch = ANY (?))
+                ON CONFLICT DO NOTHING
+                """, switchesVigentes);
+        conArray("DELETE FROM switch_pendiente_apagado WHERE id_switch = ANY (?)", switchesVigentes);
 
         jdbc.update("DELETE FROM sitio WHERE id <> ?", sitio.id());
         jdbc.update(UPSERT_SITIO, sitio.id(), sitio.nombre(), sitio.potenciaContratadaKW(),
@@ -77,6 +89,24 @@ public class SitioRepository {
             jdbc.update(UPSERT_HABITACION, h.id(), sitio.id(), i, h.nombre(), h.temperaturaEsperada(),
                     h.potenciaKW(), h.idTermostato(), h.topicTermostato(), h.idSwitch(), h.urlSwitch());
         }
+    }
+
+    /** Switches de habitaciones retiradas del inventario que todavía hay que apagar. */
+    public List<String> switchesPendientesDeApagar() {
+        return jdbc.queryForList("SELECT id_switch FROM switch_pendiente_apagado ORDER BY id_switch", String.class);
+    }
+
+    /** El switch ya se apagó (o no existe): deja de estar pendiente. */
+    public void quitarPendienteDeApagar(String idSwitch) {
+        jdbc.update("DELETE FROM switch_pendiente_apagado WHERE id_switch = ?", idSwitch);
+    }
+
+    private void conArray(String sql, String[] valores) {
+        jdbc.update(con -> {
+            PreparedStatement ps = con.prepareStatement(sql);
+            ps.setArray(1, con.createArrayOf("varchar", valores));
+            return ps;
+        });
     }
 
     /** El inventario persistido, con las habitaciones en el orden en que se cargaron. */

@@ -47,6 +47,9 @@ public class SimuladorRegistroService {
     private final HttpHeaders cabeceras;
     private final AltaControlador alta;
 
+    private static final String SIMULADOR = "simulador";
+    private final FallasActivas fallas = new FallasActivas();
+
     /** {@code null} mientras no se logró el registro. */
     private volatile Instant proximaVerificacion;
 
@@ -87,6 +90,7 @@ public class SimuladorRegistroService {
         }
         try {
             if (verificar != null && sigueRegistrado()) {
+                respondio();
                 proximaVerificacion = ahora.plus(VERIFICACION);
                 return;
             }
@@ -94,10 +98,21 @@ public class SimuladorRegistroService {
                 LOG.warn("El simulador ya no tiene registrado a '{}' (¿se reinició?): registrando de nuevo", ETIQUETA);
             }
             registrar();
+            respondio();
             proximaVerificacion = ahora.plus(VERIFICACION);
         } catch (RestClientException e) {
-            LOG.warn("El simulador no responde en {} ({}). Reintentando en {} s...",
-                    endpoint, e.getMessage(), REINTENTO.toSeconds());
+            if (fallas.empezo(SIMULADOR)) {
+                LOG.warn("El simulador no responde en {} ({}). Se reintenta cada {} s; se avisará cuando responda",
+                        endpoint, e.getMessage(), REINTENTO.toSeconds());
+            } else {
+                LOG.debug("El simulador sigue sin responder: {}", e.getMessage());
+            }
+        }
+    }
+
+    private void respondio() {
+        if (fallas.termino(SIMULADOR)) {
+            LOG.info("El simulador vuelve a responder en {}", endpoint);
         }
     }
 
