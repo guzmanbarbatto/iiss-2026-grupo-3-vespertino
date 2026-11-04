@@ -21,10 +21,11 @@ A partir de la Iteración 5, todas las credenciales y URLs han sido removidas de
 | `DB_USER`, `DB_PASS`, `DB_NAME` | Sí | Credenciales y nombre de la base PostgreSQL. |
 | `DB_URL` | Sí | JDBC del engine y del MCP, por ejemplo `jdbc:postgresql://postgres-db:5432/ecowarm`. |
 | `APP_API_KEY` | Sí | Clave que exige el engine en `X-API-Key` y que declara al registrarse en el simulador. |
-| `SIMULADOR_URL` | Sí | Base del simulador (registro y switches), por ejemplo `http://host.docker.internal:9090`. |
+| `SIMULADOR_URL` | Sí | Base del simulador para el registro (§6), por ejemplo `http://host.docker.internal:9090`. |
 | `SIMULADOR_API_KEY` | No | Clave del simulador. Vacía si el simulador no exige credencial. |
 | `CONTROLADOR_BASE_URL` | No | Dirección en la que el simulador alcanza al engine (se declara en el registro). Por defecto `http://localhost:8080`. |
 | `MQTT_BROKER_URL` | No | Broker MQTT. Vacía: se usa el que anuncia el simulador al registrarse (§6). Definida, tiene prioridad (útil si el nombre anunciado no es alcanzable desde esta red). |
+| `SWITCHES_URL` | No | Switches, para el engine y el MCP. Vacía: cada switch se usa en el `urlSwitch` que declara su habitación (§3 y §4). Definida, reemplaza a todos (útil si el nombre anunciado no es alcanzable desde esta red, por ejemplo `http://iiss-simulator:9090` fuera de la red del laboratorio). |
 | `MCP_API_KEY` | No | Si se define, el servidor MCP exige ese `X-API-Key`. Sin ella el MCP queda abierto: definila fuera de desarrollo local. |
 | `MCP_CORS_ORIGINS` | No | Orígenes web que pueden usar el MCP desde un navegador. Por defecto solo `localhost`. |
 
@@ -75,9 +76,19 @@ El sistema implementa un patrón **Fail-Safe** riguroso:
 
 * Si un termostato deja de emitir datos MQTT (sin lecturas en los últimos 10 minutos simulados; con aceleración alta, cuando pierde 3 lecturas seguidas al ritmo que el engine midió para ese termostato), el controlador apaga la calefacción de esa habitación por seguridad, pero **el ciclo general del motor continúa operando** para el resto de la casa.
 
-* Si una habitación sale del inventario (`PUT /sitio`) con su calefacción encendida, el engine apaga su switch en el ciclo siguiente: no queda prendida sin control ni fuera de la cuenta de potencia. El pendiente se guarda en la base, así que sobrevive a un reinicio del engine.
+* **Nunca se pasa de la potencia contratada.** Si la contratada baja con un `PUT /sitio` en caliente, el engine apaga lo que sobra en el ciclo siguiente: siguen encendidas las habitaciones que más la aprovechan y el resto se apaga, empezando por la más cerca de su objetivo. Si un `OFF` no se puede confirmar (el switch no responde), esa habitación se cuenta como encendida y no se enciende otra en su lugar hasta que el apagado se confirme.
 
-* El estado de cada switch se consulta al simulador en cada ciclo: un cambio hecho desde afuera (MCP, consola del simulador) se detecta y se corrige. Un switch que no responde o está `DESCONOCIDO` se comanda explícitamente, sin suponer su estado.
+* **Aprovecha la potencia contratada.** Con potencia escasa no enciende las habitaciones una por una, sino la combinación que más potencia usa: con 2 kW y habitaciones de 1,2, 0,9, 0,9 y 1,0 kW, enciende 1,9 kW (0,9 + 1,0) en lugar de quedarse con la de 1,2 sola. Entre combinaciones que usan lo mismo, elige la que incluye a las habitaciones más lejos de su objetivo.
+
+* **Un switch que no contesta no frena el control.** Los switches se consultan y se comandan todos a la vez (primero los `OFF`, después los `ON`), y cada llamada espera como mucho 1 s: un ciclo con switches colgados se demora un par de segundos, no uno por switch.
+
+* **En tarifa punta no queda nada encendido**, ni siquiera unos segundos: si la punta empieza antes de los próximos dos ciclos, el engine apaga ya, en lugar de esperar al primer ciclo dentro de la franja.
+
+* Solo se comandan los **switches del sitio vigente**: si una habitación sale del inventario, su switch no se vuelve a consultar ni a comandar.
+
+* La última lectura de cada termostato es la que **llegó última**, no la de hora simulada mayor: cada `INICIAR` puede volver el reloj simulado atrás, y las lecturas de una corrida anterior no tapan a las nuevas.
+
+* Cada switch se consulta y se comanda en el `urlSwitch` de su habitación, como dice el estándar. Su estado real se relee como mucho cada 5 s, no en cada ciclo (a ×60 eran dos consultas por segundo por switch), y un comando aplicado lo deja conocido sin consultar. Un cambio hecho desde afuera (MCP, consola del simulador) se detecta en 5 s como máximo y se corrige. Un switch que no responde o está `DESCONOCIDO` se vuelve a consultar en el ciclo siguiente y se comanda explícitamente, sin suponer su estado.
 
 * El engine se suscribe **exactamente a los topics que declara el inventario** (aunque no sigan la convención `<idTermostato>/status/temperature:0`) y ajusta la suscripción en cada `PUT /sitio`. Si se corta el broker MQTT, se reconecta y **vuelve a suscribirse** solo. Si el simulador se reinicia y olvida el registro, el engine se registra de nuevo (lo verifica cada minuto).
 
@@ -87,14 +98,24 @@ El sistema implementa un patrón **Fail-Safe** riguroso:
 
 ## 🤖 Servidor MCP para Agentes de IA (`modules/mcp`)
 
-El proyecto incluye un servidor **Model Context Protocol (MCP)** sobre HTTP + SSE en el puerto `8081` (`/mcp/sse` y `/mcp/message`), desarrollado con **Spring AI 1.0**. Expone **7 tools** (`obtenerSitio`, `consultarEstadoHabitaciones`, `historialTemperaturas`, `obtenerEstadoControl`, `iniciarControl`, `detenerControl` y `accionarSwitch`) que combinan la API REST del `engine`, los switches del simulador y lectura en modo `read-only` de PostgreSQL.
+El proyecto incluye un servidor **Model Context Protocol (MCP)** sobre HTTP + SSE en el puerto `8081` (`/mcp/sse` y `/mcp/message`), desarrollado con **Spring AI 1.0**. Expone **7 tools** (`obtenerSitio`, `consultarEstadoHabitaciones`, `historialTemperaturas`, `obtenerEstadoControl`, `iniciarControl`, `detenerControl` y `accionarSwitch`) que combinan la API REST del `engine`, los switches (cada uno en el `urlSwitch` de su habitación, igual que el engine) y lectura en modo `read-only` de PostgreSQL.
 
 * **Arquitectura 4+1 del Módulo MCP:** [`/docs/mcp/4mas1-mcp.md`](docs/mcp/4mas1-mcp.md)
 * **Evidencia de Pruebas E2E con MCP Inspector y Simulador:** [`/docs/mcp/pruebas-mcp.md`](docs/mcp/pruebas-mcp.md)
 
 ## 🧪 Calidad y Testing
 
-* **Tests Unitarios y de Integración:** El proyecto cuenta con **165 tests automatizados** (`mvn verify`): 23 en `core` (`EvaluadorCoreTest`), 115 en `engine` (ciclo de control, comportamiento ante fallas, API REST contra el contrato, validación del inventario, MQTT, registro y repositorios contra PostgreSQL real) y 27 en `mcp`. Los tests de repositorios usan Testcontainers: necesitan Docker y, sin él (por ejemplo dentro de `docker build`), se omiten. El detalle está en [`/docs/tests/criterio-tests.md`](docs/tests/criterio-tests.md).
+* **Tests Unitarios y de Integración:** El proyecto cuenta con **211 tests automatizados** (`mvn verify`): 37 en `core` (`EvaluadorCoreTest`), 142 en `engine` (ciclo de control, comportamiento ante fallas, API REST contra el contrato, validación del inventario, MQTT, registro, repositorios contra PostgreSQL real y un test de punta a punta con 13 escenarios normales y de falla) y 32 en `mcp`. Los tests de repositorios y el de punta a punta (PostgreSQL y Mosquitto reales) usan Testcontainers: necesitan Docker y, sin él (por ejemplo dentro de `docker build`), se omiten. El detalle está en [`/docs/tests/criterio-tests.md`](docs/tests/criterio-tests.md).
+
+* **Escenarios de la cátedra (`ecowarm-run`):** el JAR `ecowarm-run.jar` del curso trae el simulador, el broker y 9 escenarios firmados, y deja un reporte. Con el stack levantado (`bash scripts/up.sh`), desde la carpeta donde esté el JAR:
+
+  ```bash
+  java -jar ecowarm-run.jar --host host.docker.internal --clave <SIMULADOR_API_KEY de docker/.env> todos
+  ```
+
+  `--host host.docker.internal` hace que los `urlSwitch` y el broker que recibe el engine (en Docker) apunten a la máquina, donde corre el runner; `--clave` es la clave que el engine usa con el simulador (si no se pasa, el runner espera `iiss-2026`). El engine se registra solo (§6) en `SIMULADOR_URL` y los 9 escenarios tardan unos 18 minutos. El resultado queda en `ecowarm-reporte/reporte.md`; `java -jar ecowarm-run.jar listar` muestra los escenarios.
+
+* **Integración continua:** en cada pull request y push a `main`, GitHub Actions ([`.github/workflows/maven.yml`](.github/workflows/maven.yml)) corre `mvn verify` completo, incluidos los tests con PostgreSQL y Mosquitto reales (y falla si alguno se omitió), y construye las imágenes Docker.
 
 * **Cobertura (JaCoCo):** El módulo `core` posee un nivel de cobertura de pruebas superior al **85%**. El reporte HTML interactivo se encuentra disponible en `/docs/calidad/cobertura/index.html`.
 

@@ -13,7 +13,7 @@ El módulo **`mcp`** incorpora un servidor **Model Context Protocol (MCP)** cons
 Para mantener el desacoplamiento arquitectónico del proyecto, el servidor MCP implementa una **arquitectura híbrida sin acoplarse al JAR del `engine`**:
 
 1. **Cliente REST del Engine (`EngineClient`):** consume los endpoints oficiales del controlador (`GET /sitio`, `GET /control`, `POST /control/comandos`) autenticándose mediante el header `X-API-Key`.
-2. **Cliente REST del Simulador (`SimuladorClient`):** consulta el estado en vivo de cada relé (`GET /switches/{idSwitch}`) y ejecuta órdenes manuales de encendido/apagado (`POST /switches/{idSwitch}/comandos`).
+2. **Cliente REST de los switches (`SimuladorClient`):** consulta el estado en vivo de cada relé (`GET {urlSwitch}/switches/{idSwitch}`) y ejecuta órdenes manuales de encendido/apagado (`POST {urlSwitch}/switches/{idSwitch}/comandos`). Como el engine, usa el `urlSwitch` que declara cada habitación en el inventario (§3 y §4); `SWITCHES_URL` los reemplaza a todos si ese nombre no es alcanzable desde la red del MCP.
 3. **Repositorio JDBC de Solo Lectura (`TemperaturaRepository`):** consulta la tabla `historico_temperatura` en PostgreSQL con conexión configurada en modo `read-only=true` para obtener la última temperatura reportada por MQTT y la serie histórica de cada habitación.
 
 ```mermaid
@@ -31,7 +31,7 @@ flowchart LR
 
     CLIENT -- "SSE /mcp/sse<br/>POST /mcp/message" --> TOOLS
     TOOLS --> ECLI -- "GET /sitio, GET/POST /control<br/>(X-API-Key)" --> ENGINE
-    TOOLS --> SCLI -- "GET/POST /switches/{id}<br/>(X-API-Key)" --> SIM
+    TOOLS --> SCLI -- "GET/POST {urlSwitch}/switches/{id}<br/>(X-API-Key)" --> SIM
     TOOLS --> TREPO -- "SELECT (read-only)" --> DB
 ```
 
@@ -98,10 +98,10 @@ Luego de encender la calefacción de `room2`, se invocó la tool `historialTempe
 
 ## 4. Pruebas Automatizadas del Módulo (`mvn test -pl modules/mcp`)
 
-Además de la verificación E2E con MCP Inspector, el módulo cuenta con una suite de **27 pruebas automatizadas** en JUnit 5 y AssertJ/Mockito que se ejecutan en el pipeline de Maven:
+Además de la verificación E2E con MCP Inspector, el módulo cuenta con una suite de **32 pruebas automatizadas** en JUnit 5 y AssertJ/Mockito que se ejecutan en el pipeline de Maven:
 
-- **`EcoWarmToolsTest` (12 tests):** valida todas las reglas de las 7 tools, el cálculo de potencia disponible en toda la casa, la tolerancia a fallos parciales (caída de BD o del simulador reportada en `advertencias`), la validación de parámetros (`fechaHora` ISO-8601, `factorTiempo > 0`, rangos de `limite`) y la advertencia cuando se acciona un switch con el control automático en ejecución.
-- **`ClientesHttpTest` (7 tests):** verifica con `MockRestServiceServer` la serialización/deserialización JSON, el envío del header `X-API-Key` y la traducción de códigos HTTP (`401`, `404`) a mensajes claros para el agente.
+- **`EcoWarmToolsTest` (13 tests):** valida todas las reglas de las 7 tools, que cada switch se consulte y se comande en el `urlSwitch` de su habitación, el cálculo de potencia disponible en toda la casa, la tolerancia a fallos parciales (caída de BD o del simulador reportada en `advertencias`), la validación de parámetros (`fechaHora` ISO-8601, `factorTiempo > 0`, rangos de `limite`) y la advertencia cuando se acciona un switch con el control automático en ejecución.
+- **`ClientesHttpTest` (11 tests):** verifica con `MockRestServiceServer` la serialización/deserialización JSON, el envío del header `X-API-Key`, la traducción de códigos HTTP (`401`, `404`) y de un switch inalcanzable a mensajes claros para el agente, y a qué dirección va cada switch: su `urlSwitch`, `SWITCHES_URL` si está definida, o `SIMULADOR_URL` si la habitación no trae `urlSwitch`.
 - **`McpServerContextTest` (5 tests):** levanta el contexto completo de Spring Boot, comprueba que las 7 tools queden registradas en el `ToolCallbackProvider` con sus esquemas JSON de entrada, verifica que el filtro de seguridad rechace con `401 Unauthorized` las peticiones sin `X-API-Key` cuando `MCP_API_KEY` está configurada, y que CORS acepte clientes web locales (MCP Inspector) pero rechace sitios ajenos.
 - **`TemperaturaRepositoryTest` (3 tests):** ejecuta las consultas del histórico contra un PostgreSQL real (Testcontainers) con el esquema del engine: última lectura por habitación, historial ordenado con límite y lectura de fechas en UTC sin depender de la zona horaria de la JVM. Sin Docker disponible se omite.
 

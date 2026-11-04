@@ -36,13 +36,17 @@ CREATE TABLE IF NOT EXISTS historico_temperatura (
 );
 ALTER TABLE historico_temperatura ADD COLUMN IF NOT EXISTS recibida_en TIMESTAMP;
 
--- Switches de habitaciones que salieron del inventario y todavía hay que apagar. Se anotan en la misma
--- transacción del PUT /sitio y se borran al apagarlos: un reinicio del engine no los deja encendidos.
-CREATE TABLE IF NOT EXISTS switch_pendiente_apagado (
-    id_switch VARCHAR(50) PRIMARY KEY
-);
+-- Una versión anterior apagaba los switches de las habitaciones que salían del inventario y los anotaba
+-- acá. Ya no: el controlador comanda solo los switches del sitio vigente. Se borra la tabla para que una
+-- base vieja no conserve pendientes que nadie va a leer.
+DROP TABLE IF EXISTS switch_pendiente_apagado;
 
 -- El ciclo de control y el MCP buscan la última lectura de cada habitación: sin este índice
--- cada consulta recorría todo el histórico, que crece sin límite.
-CREATE INDEX IF NOT EXISTS idx_historico_habitacion_fecha
-    ON historico_temperatura (habitacion_id, fecha_hora DESC);
+-- cada consulta recorría todo el histórico, que crece sin límite. La última es la que LLEGÓ última,
+-- no la de hora simulada mayor: cada INICIAR puede volver el reloj simulado atrás, y las lecturas de una
+-- corrida anterior (con horas más tardías) taparían a las nuevas. Las filas anteriores a recibida_en usan
+-- su fecha_hora.
+CREATE INDEX IF NOT EXISTS idx_historico_habitacion_llegada
+    ON historico_temperatura (habitacion_id, (COALESCE(recibida_en, fecha_hora)) DESC);
+-- El índice anterior ordenaba por la hora simulada: ya no lo usa ninguna consulta.
+DROP INDEX IF EXISTS idx_historico_habitacion_fecha;

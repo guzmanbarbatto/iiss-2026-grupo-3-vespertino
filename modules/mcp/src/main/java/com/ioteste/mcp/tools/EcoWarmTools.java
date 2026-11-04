@@ -28,9 +28,9 @@ import org.springframework.stereotype.Component;
  * Tools MCP de EcoWarm.
  *
  * <p>Combina tres fuentes: la API REST del engine (sitio y control), la base de datos en modo solo
- * lectura (temperaturas) y la API del simulador (switches). Los errores se lanzan como excepciones
- * con mensajes en español; Spring AI los devuelve al cliente MCP como resultado con
- * {@code isError = true}.
+ * lectura (temperaturas) y los switches, cada uno en el {@code urlSwitch} de su habitación. Los
+ * errores se lanzan como excepciones con mensajes en español; Spring AI los devuelve al cliente MCP
+ * como resultado con {@code isError = true}.
  */
 @Component
 public class EcoWarmTools {
@@ -208,7 +208,7 @@ public class EcoWarmTools {
             throw new IllegalArgumentException("Debe indicar habitacionId.");
         }
         Habitacion hab = buscarHabitacion(sitioCargado(), habitacionId);
-        RespuestaComando respuesta = simuladorClient.comandarSwitch(hab.idSwitch(), encender);
+        RespuestaComando respuesta = simuladorClient.comandarSwitch(hab.urlSwitch(), hab.idSwitch(), encender);
 
         return new ResultadoAccionSwitch(
                 hab.id(),
@@ -244,7 +244,7 @@ public class EcoWarmTools {
 
     private String estadoSwitch(Habitacion hab, List<String> advertencias) {
         try {
-            String estado = simuladorClient.consultarSwitch(hab.idSwitch()).estado();
+            String estado = simuladorClient.consultarSwitch(hab.urlSwitch(), hab.idSwitch()).estado();
             return estado == null ? SWITCH_NO_DISPONIBLE : estado;
         } catch (ServicioExternoException e) {
             advertencias.add(e.getMessage());

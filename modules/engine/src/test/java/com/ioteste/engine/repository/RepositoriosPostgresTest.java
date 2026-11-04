@@ -94,37 +94,6 @@ class RepositoriosPostgresTest {
 
         assertThat(sitios.obtenerInventario()).contains(nuevo);
         assertThat(jdbc.queryForObject("SELECT count(*) FROM habitacion", Integer.class)).isEqualTo(1);
-        assertThat(sitios.switchesPendientesDeApagar()).containsExactly("sw-room1");
-    }
-
-    // ---------------------------------------------------------------- switches pendientes de apagar
-
-    @Test
-    void elPrimerInventarioNoDejaNadaPendiente() {
-        sitios.guardarInventario(inventario("2.0", "casa", habitacion("room1", 20.0)));
-
-        assertThat(sitios.switchesPendientesDeApagar()).isEmpty();
-    }
-
-    @Test
-    void alSacarUnaHabitacionSuSwitchQuedaAnotadoEnLaBaseHastaApagarlo() {
-        sitios.guardarInventario(inventario("2.0", "casa", habitacion("room1", 20.0), habitacion("room2", 20.0)));
-
-        sitios.guardarInventario(inventario("2.0", "casa", habitacion("room1", 20.0)));
-        assertThat(sitios.switchesPendientesDeApagar()).containsExactly("sw-room2");
-
-        sitios.quitarPendienteDeApagar("sw-room2");
-        assertThat(sitios.switchesPendientesDeApagar()).isEmpty();
-    }
-
-    @Test
-    void siLaHabitacionVuelveAlInventarioDejaDeEstarPendiente() {
-        sitios.guardarInventario(inventario("2.0", "casa", habitacion("room1", 20.0), habitacion("room2", 20.0)));
-        sitios.guardarInventario(inventario("2.0", "casa", habitacion("room1", 20.0)));
-
-        sitios.guardarInventario(inventario("2.0", "casa", habitacion("room1", 20.0), habitacion("room2", 20.0)));
-
-        assertThat(sitios.switchesPendientesDeApagar()).isEmpty();
     }
 
     @Test
@@ -150,10 +119,8 @@ class RepositoriosPostgresTest {
             assertThatThrownBy(() -> sitios.guardarInventario(roto))
                     .isInstanceOf(DataIntegrityViolationException.class);
             assertThat(sitios.obtenerInventario()).contains(original);
-            assertThat(sitios.switchesPendientesDeApagar()).isEmpty(); // también se revirtió lo anotado
         } finally {
             jdbc.update("DELETE FROM sitio");
-            jdbc.update("DELETE FROM switch_pendiente_apagado");
         }
     }
 
@@ -171,15 +138,16 @@ class RepositoriosPostgresTest {
     }
 
     @Test
-    void ultimasLecturasDevuelveLaMasRecienteDeCadaHabitacion() {
+    void ultimasLecturasDevuelveLaQueLlegoUltimaEnCadaHabitacion() {
         sitios.guardarInventario(inventario("2.0", "casa", habitacion("room1", 20.0), habitacion("room2", 20.0)));
         historico.registrar("ht-room1/status/temperature:0", T1, RECIBIDA, 18.0);
         historico.registrar("ht-room1/status/temperature:0", T1.plusSeconds(30), RECIBIDA.plusSeconds(5), 18.4);
+        // Llega última aunque su hora simulada sea anterior: un INICIAR volvió el reloj simulado atrás
         historico.registrar("ht-room1/status/temperature:0", T1.minusSeconds(30), RECIBIDA.plusSeconds(10), 17.0);
 
         assertThat(historico.ultimasLecturas()).containsOnlyKeys("room1");
         assertThat(historico.ultimasLecturas().get("room1"))
-                .isEqualTo(new Lectura(T1.plusSeconds(30), RECIBIDA.plusSeconds(5), 18.4, Duration.ofSeconds(5)));
+                .isEqualTo(new Lectura(T1.minusSeconds(30), RECIBIDA.plusSeconds(10), 17.0, Duration.ofSeconds(5)));
     }
 
     @Test
@@ -244,19 +212,21 @@ class RepositoriosPostgresTest {
 
         List<String> plan = jdbc.queryForList("EXPLAIN " + HistoricoRepository.SQL_ULTIMAS_LECTURAS, String.class);
 
-        assertThat(String.join("\n", plan)).contains("idx_historico_habitacion_fecha");
+        assertThat(String.join("\n", plan)).contains("idx_historico_habitacion_llegada");
     }
 
     // ---------------------------------------------------------------- esquema
 
     @Test
     void elEsquemaEsIdempotenteYActualizaBasesDeVersionesAnteriores() {
-        // Una base creada por la versión anterior (init.sql) no tenía estas columnas ni el índice
-        jdbc.execute("DROP INDEX idx_historico_habitacion_fecha");
+        // Una base creada por una versión anterior no tenía estas columnas ni el índice por llegada, y tenía
+        // el índice por hora simulada
+        jdbc.execute("DROP INDEX idx_historico_habitacion_llegada");
+        jdbc.execute("CREATE INDEX idx_historico_habitacion_fecha ON historico_temperatura (habitacion_id, "
+                + "fecha_hora DESC)");
         jdbc.execute("ALTER TABLE sitio DROP COLUMN schema_version");
         jdbc.execute("ALTER TABLE habitacion DROP COLUMN orden");
         jdbc.execute("ALTER TABLE historico_temperatura DROP COLUMN recibida_en");
-        jdbc.execute("DROP TABLE switch_pendiente_apagado");
 
         ejecutarSchemaSql();
         ejecutarSchemaSql();
@@ -264,11 +234,22 @@ class RepositoriosPostgresTest {
         sitios.guardarInventario(inventario("2.3", "casa", habitacion("room1", 20.0)));
         assertThat(sitios.obtenerInventario().orElseThrow().schemaVersion()).isEqualTo("2.3");
         assertThat(historico.registrar("ht-room1/status/temperature:0", T1, RECIBIDA, 20.0)).isEqualTo(1);
-        sitios.guardarInventario(inventario("2.3", "casa"));
-        assertThat(sitios.switchesPendientesDeApagar()).containsExactly("sw-room1");
+        assertThat(jdbc.queryForList("SELECT indexname FROM pg_indexes WHERE indexname LIKE 'idx_historico%'",
+                String.class)).containsExactly("idx_historico_habitacion_llegada");
+    }
+
+    @Test
+    void unaBaseQueTeniaSwitchesPendientesDeApagarLosPierde() {
+        // Una versión anterior anotaba acá los switches de las habitaciones retiradas para apagarlos. Ya no se
+        // comandan (no son del sitio vigente): la tabla se borra para no dejar pendientes que nadie lee
+        jdbc.execute("CREATE TABLE switch_pendiente_apagado (id_switch VARCHAR(50) PRIMARY KEY)");
+        jdbc.update("INSERT INTO switch_pendiente_apagado (id_switch) VALUES ('sw-viejo')");
+
+        ejecutarSchemaSql();
+
         assertThat(jdbc.queryForObject(
-                "SELECT count(*) FROM pg_indexes WHERE indexname = 'idx_historico_habitacion_fecha'", Integer.class))
-                .isEqualTo(1);
+                "SELECT count(*) FROM information_schema.tables WHERE table_name = 'switch_pendiente_apagado'",
+                Integer.class)).isZero();
     }
 
     // ---------------------------------------------------------------- auxiliares

@@ -1,4 +1,4 @@
-# Criterios de Adecuación del Conjunto de Tests (Iteración 4)
+# Criterios de Adecuación del Conjunto de Tests
 
 Este documento detalla el diseño y los criterios de cobertura aplicados para las pruebas unitarias del módulo `core` (`EvaluadorCoreTest.java`), asegurando el correcto funcionamiento de las reglas de negocio críticas bajo una arquitectura guiada por el dominio.
 
@@ -36,13 +36,65 @@ El simulador informa `DESCONOCIDO` mientras nadie accionó un relé, y el engine
 Una habitación se enciende apenas baja de la temperatura esperada, pero no se apaga hasta superarla por `HISTERESIS_C` (0,5 °C). Se probaron los dos lados del margen: encendida a +0,3 °C sigue encendida; a +0,5 °C se apaga. Sin el margen, una lectura que oscila alrededor del objetivo prendía y apagaba el relé en cada ciclo.
 
 ### F. Prioridad y orden de las órdenes
-*   Con potencia escasa se enciende primero la habitación más lejos de su objetivo, sin importar su posición en el inventario.
+*   Con potencia escasa y combinaciones que aprovechan lo mismo, se enciende primero la habitación más lejos de su objetivo, sin importar su posición en el inventario.
 *   Las órdenes `OFF` van siempre antes que las `ON`, para liberar potencia antes de volver a ocuparla.
+
+### G. Contratada que baja y redondeo
+*   Si lo encendido ya no entra en la contratada (bajó con un `PUT /sitio` en caliente), siguen encendidas las que más la aprovechan y se apaga el resto, empezando por la más cerca de su objetivo; la apagada no se vuelve a encender en el mismo ciclo. Con 3,5 kW encendidos y 2,5 contratados, apagar la más cerca (1,5 kW) dejaría 2,0 en uso; se apaga una de 1,0 y quedan 2,5. Con la contratada por debajo de todo, se apaga todo.
+*   Las potencias se comparan con una tolerancia de redondeo: 1,1 + 2,2 kW (3,3000000000000003 en `double`) entra en 3,3 kW, tanto para seguir encendida como para encender.
+
+### H. Punta anticipada
+*   Si la punta empieza antes de la próxima evaluación, se apaga ya y no se enciende nada. Dos minutos antes (con un minuto de anticipación) sigue el control normal. Sin anticipación, cuenta solo la hora actual.
+
+### I. Aprovechamiento de la contratada
+Encender una por una, por prioridad, puede dejar potencia sin usar (el escenario F05 de `ecowarm-run` usaba el 67 % de lo que podía). Se elige la combinación que más potencia usa.
+*   **El sitio de F05:** 2 kW y cuatro habitaciones empatadas de 1,2, 0,9, 0,9 y 1,0 kW. Se encienden 0,9 + 1,0 (1,9 kW), no la de 1,2 sola (que dejaba 0,8 kW donde no entraba ninguna).
+*   **Empate en potencia:** entre combinaciones que suman lo mismo, la que incluye a las más lejos de su objetivo.
+*   **Con algo ya encendido:** la potencia que queda libre se llena con la combinación que mejor entra, aunque deje afuera a una habitación con más frío que sola aprovecharía menos.
+*   **Muchas habitaciones:** se combinan las 16 de más prioridad (`MAX_A_COMBINAR`); las demás se suman después, si entran.
 
 ## 3. Tests del módulo `engine` (Iteración 5)
 El `engine` se prueba en capas, con el tiempo fijado por un reloj inyectable para que cada caso sepa si está dentro o fuera de la tarifa punta:
-*   **`EvaluadorJobServiceTest`:** el ciclo de control completo con repositorios y switches simulados. Cubre reglas fuera de punta, límite de potencia, tarifa punta (también con reloj acelerado), fail-safe de termostatos (sin lecturas o vencidas, también con aceleración x600, donde el límite de 3 lecturas perdidas al ritmo de cada termostato evita apagados falsos, incluso con termostatos que publican más lento), que el estado del switch se relea en cada ciclo (un cambio externo se corrige), que una falla al consultar o comandar un switch no envenene ciclos siguientes ni frene a los demás, que los switches de habitaciones retiradas del inventario se apaguen (con reintento, y se descarten si el switch no existe en el simulador) y que una falla que dura varios ciclos se avise solo al empezar y al terminar.
+*   **`EvaluadorJobServiceTest`:** el ciclo de control completo con repositorios y switches simulados. Cubre reglas fuera de punta, límite de potencia, tarifa punta (también con reloj acelerado), fail-safe de termostatos (sin lecturas o vencidas, también con aceleración x600, donde el límite de 3 lecturas perdidas al ritmo de cada termostato evita apagados falsos, incluso con termostatos que publican más lento), que el estado del switch se relea en cada ciclo (un cambio externo se corrige), que una falla al consultar o comandar un switch no envenene ciclos siguientes ni frene a los demás, que un `OFF` que falla haga postergar un `ON` que con esa habitación no entraría (y que el `ON` salga cuando el apagado se confirma, o igual si entra), que la punta se anticipe un ciclo antes de empezar, que los switches se consulten a la vez (uno que no contesta no demora a los demás), que los `OFF` salgan a la vez y los `ON` recién cuando terminaron, y que una falla que dura varios ciclos se avise solo al empezar y al terminar.
 *   **`ApiRestTest`:** la API REST contra el contrato `controlador.openapi-v2.yaml`: API key, `404`/`400`/`503` con el cuerpo de error uniforme, validación completa del inventario y comandos de control.
 *   **`ValidadorInventarioTest`:** cada regla del §1 (campos obligatorios, rangos, formato de la franja, `desde < hasta`, unicidad de `id`, `idTermostato` e `idSwitch`).
-*   **`RepositoriosPostgresTest`:** el SQL contra un PostgreSQL real (Testcontainers): ida y vuelta exacta del inventario, conservación del histórico al reemplazarlo, ritmo de cada termostato (mediana robusta a cortes y mensajes repetidos), switches pendientes de apagar guardados en la misma transacción, atomicidad ante una falla, fechas en UTC, uso del índice y migración de bases de versiones anteriores. Sin Docker se omite.
-*   **`MqttSubscriberServiceTest`, `SwitchClientServiceTest`, `SimuladorRegistroServiceTest`, `RelojControlTest`, `FallasActivasTest`:** la suscripción MQTT exacta a los topics declarados (también fuera de la convención), su ajuste en cada `PUT /sitio` y tras una reconexión, la interpretación de las respuestas del simulador, el mantenimiento del registro y que los avisos de falla no se repitan en cada ciclo.
+*   **`RepositoriosPostgresTest`:** el SQL contra un PostgreSQL real (Testcontainers): ida y vuelta exacta del inventario, conservación del histórico al reemplazarlo, ritmo de cada termostato (mediana robusta a cortes y mensajes repetidos), que la última lectura sea la que llegó última aunque su hora simulada sea anterior (un `INICIAR` puede volver el reloj atrás), atomicidad ante una falla, fechas en UTC, uso del índice y migración de bases de versiones anteriores (incluida la que tenía la tabla de switches pendientes de apagar). Sin Docker se omite.
+*   **`MqttSubscriberServiceTest`, `SwitchClientServiceTest`, `SimuladorRegistroServiceTest`, `RelojControlTest`, `FallasActivasTest`:** la suscripción MQTT exacta a los topics declarados (también fuera de la convención), su ajuste en cada `PUT /sitio` y tras una reconexión, la interpretación de las respuestas del simulador, el uso del `urlSwitch` de cada habitación (o de `SWITCHES_URL`), el estado conocido que evita consultar cada switch en cada ciclo (vence a los 5 s, se actualiza con cada comando y se descarta ante una falla), que un switch que acepta la conexión y no contesta se dé por fallado al segundo (contra un servidor HTTP real que no responde), el mantenimiento del registro y que los avisos de falla no se repitan en cada ciclo.
+
+## 4. Test de punta a punta (Iteración 6)
+`PuntaAPuntaTest` (en `modules/engine/src/test/java/com/ioteste/engine/e2e/`) levanta el engine completo (API REST, registro, suscripción MQTT, ciclo de control y base) y lo prueba desde afuera, como lo haría el simulador de la cátedra: carga el sitio con `PUT /sitio`, arranca el control con `POST /control/comandos` y mira qué comandos reciben los switches y cuándo.
+
+| Pieza | En el test |
+|---|---|
+| PostgreSQL | Real (Testcontainers, `postgres:15-alpine`) |
+| Broker MQTT | Mosquitto real (Testcontainers, `eclipse-mosquitto:2`) |
+| Simulador: registro (§6) y switches (§3 y §4) | `SimuladorFalso`: servidor HTTP (un hilo por pedido, como el de la cátedra) que exige la clave, guarda el estado de cada switch, registra cada comando (y bajo qué ruta base llegó, para simular switches en otro servidor), cuenta las consultas, anota la mayor potencia encendida a la vez, puede "caerse" y puede "perder los OFF" (la conexión queda colgada más que el timeout del engine) |
+| Termostatos (§2) | `Termostatos`: publican cada 0,5 s con el payload del estándar |
+
+El engine se configura como en producción: el broker no se le indica, lo toma de la respuesta del registro. Corre a ×600 (un ciclo cada 0,5 s reales, 10 minutos simulados por segundo) un sábado, para que la tarifa punta no interfiera salvo en su propio escenario.
+
+| Tipo | Escenario | Qué verifica |
+|---|---|---|
+| Normal | Arranque | Se registra con su etiqueta y su clave, se conecta al broker anunciado y recibe las lecturas de los 3 topics, incluido uno fuera de la convención |
+| Normal | Encendido y apagado | Con frío enciende y no hay apagados falsos del fail-safe durante 30 minutos simulados. A +0,2 °C de la esperada sigue encendida (histéresis) y a +0,6 °C se apaga. Solo dos comandos en total |
+| Normal | Reparto de potencia | Con 3,5 kW pedidos y 3,0 contratados enciende 2,5 kW: entre las dos combinaciones que suman eso, la de las habitaciones más lejos de su objetivo. Cuando una llega, la potencia liberada pasa a la que esperaba. Ni por un instante se superan los 3,0 kW |
+| Normal | Switches en servidores distintos | Cada switch se comanda en el `urlSwitch` de su habitación: room3 tiene el suyo en `/edificio-b` |
+| Normal | Menos consultas | En 12 ciclos consulta cada switch 1 a 3 veces, no 12. Si alguien enciende un switch a mano, igual lo detecta y lo corrige |
+| Normal | Tarifa punta | Un martes a las 16:55 simuladas enciende; apaga en el último ciclo antes de las 17:00 (no después, ni mucho antes) y no vuelve a encender aunque siga con frío |
+| Normal | Contratada que baja | Con 2,5 kW encendidos, un `PUT /sitio` en caliente baja la contratada a 1,2: apaga lo que sobra y queda lo que entra |
+| Falla | Termostato callado | Su habitación se apaga tras 3 lecturas perdidas, no antes; las demás siguen. Al volver a publicar, se enciende de nuevo |
+| Falla | Simulador caído | El ciclo y la API siguen funcionando; al volver el simulador, el switch se corrige al estado que corresponde |
+| Falla | Broker caído | Sin lecturas, el fail-safe apaga. Al volver el broker, el engine se reconecta, se vuelve a suscribir solo y sigue controlando |
+| Falla | Base caída | La API sigue respondiendo. Al volver la base, las lecturas se guardan de nuevo, el control se recupera solo y el sitio se conserva |
+| Falla | Habitación retirada encendida | Su switch no se vuelve a consultar ni a comandar: ya no es del sitio vigente. El control sigue con las demás |
+| Falla | Se pierden los `OFF` | Hay que apagar una para encender otra, pero los `OFF` quedan colgados: no enciende la otra mientras no puede apagar. Cuando vuelven, apaga y enciende; nunca se pasó de la contratada |
+
+*   **Independencia:** antes de cada escenario el control se detiene, los switches se apagan, se recarga el sitio y las 3 habitaciones quedan tibias. Las esperas son por condición (Awaitility), sin pausas fijas.
+*   **Detecta regresiones reales:** se introdujeron a propósito dos errores. Si el engine no se vuelve a suscribir al reconectarse, falla el escenario del broker. Si el `core` enciende antes de apagar, falla el del reparto de potencia (el simulador falso registra 3,5 kW con 3,0 contratados). Si se vuelve a consultar cada switch en cada ciclo, falla el de las consultas; si se ignora el `urlSwitch`, falla el de los servidores distintos.
+*   **Estabilidad:** pasó 5 corridas seguidas; tarda alrededor de un minuto.
+*   **Requiere Docker:** sin él se omite, igual que los tests de repositorios. En GitHub Actions lo corre el job `tests` (ver abajo).
+
+## 5. Integración continua
+El workflow [`.github/workflows/maven.yml`](../../.github/workflows/maven.yml) corre en cada pull request y en cada push a `main`, con dos jobs:
+*   **`tests`:** `mvn verify` directamente en el runner de GitHub, que tiene Docker. Corren los 211 tests (incluidos los que usan PostgreSQL y Mosquitto reales), Checkstyle y el umbral de cobertura del `core`. Después **falla si algún test se omitió**: sin Docker, los tests con Testcontainers se omiten en silencio y el build quedaría en verde sin haberlos corrido. Si algo falla, los reportes de Surefire quedan como artefacto del job durante 7 días.
+*   **`build-and-verify`:** construye las imágenes Docker (`scripts/build.sh`), lo mismo que se despliega.

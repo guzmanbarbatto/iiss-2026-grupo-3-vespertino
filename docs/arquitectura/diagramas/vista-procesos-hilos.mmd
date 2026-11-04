@@ -1,0 +1,45 @@
+---
+config:
+  layout: elk
+  flowchart:
+    wrappingWidth: 320
+---
+%% Vista de Procesos: los flujos concurrentes del engine y lo que comparten.
+%% El simulador aparece dos veces: a la izquierda cuando llama al engine y a la derecha cuando el engine lo llama.
+%% Se renderiza a ../VistaProcesosHilos.png (ver docs/arquitectura/diagramas/README.md).
+flowchart LR
+    SIMC["<b>Simulador de la cátedra</b><br/><i>llama al engine</i>"]
+    TERM(["Termostatos"])
+    MQ[("<b>Mosquitto</b><br/>broker MQTT")]
+
+    subgraph ENGINE["Proceso engine (una JVM)"]
+        HTTP["<b>Hilos HTTP</b> · Tomcat<br/>SitioController, ControlController<br/><i>a pedido</i>"]
+        REG["<b>Hilo del registro</b> · scheduler<br/>SimuladorRegistroService<br/><i>cada 5 s hasta registrarse;<br/>después verifica cada 1 min</i>"]
+        CICLO["<b>Hilo del ciclo de control</b> · scheduler<br/>EvaluadorJobService → EvaluadorCore<br/><i>cada máx(500 ms, 30 s ÷ factor);<br/>un hilo virtual por switch en cada tanda</i>"]
+        SUB["<b>Hilo MQTT</b> · Paho<br/>MqttSubscriberService<br/><i>por cada mensaje; reconexión automática</i>"]
+    end
+
+    RELOJ{{"<b>RelojControl</b><br/>hora simulada, en memoria"}}
+    DB[("<b>PostgreSQL</b><br/>sitio, habitacion<br/>historico_temperatura")]
+    SIMS["<b>Simulador de la cátedra</b><br/><i>registro §6; switches §3 y §4,<br/>cada uno en su urlSwitch</i>"]
+
+    SIMC -- "PUT /sitio<br/>POST /control/comandos" --> HTTP
+    TERM -- "publican" --> MQ
+    MQ -- "solo los topics<br/>del inventario" --> SUB
+
+    HTTP -- "INICIAR / DETENER" --> RELOJ
+    HTTP -- "inventario,<br/>en una transacción" --> DB
+    HTTP -. "evento InventarioReemplazado:<br/>ajusta la suscripción" .-> SUB
+    REG -- "POST /controladores" --> SIMS
+    REG -. "evento: broker anunciado" .-> SUB
+    CICLO -- "lee la hora simulada" --> RELOJ
+    CICLO -- "lee sitio, lecturas<br/>y ritmo" --> DB
+    CICLO -- "GET y POST {urlSwitch}/switches/{id},<br/>todos a la vez, timeout 1 s" --> SIMS
+    SUB -- "lectura y hora de llegada" --> DB
+
+    classDef hilo fill:#e8f4fd,stroke:#2b7bb9,color:#0b2a40
+    classDef compartido fill:#fff4d6,stroke:#c48a00,color:#3d2b00
+    classDef externo fill:#f2f2f2,stroke:#777,color:#222
+    class HTTP,REG,SUB,CICLO hilo
+    class RELOJ,DB compartido
+    class SIMC,SIMS,TERM,MQ externo

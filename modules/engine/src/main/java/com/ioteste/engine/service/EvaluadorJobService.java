@@ -32,7 +32,11 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledFuture;
+import java.util.function.Function;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.TaskScheduler;
@@ -73,10 +77,15 @@ public class EvaluadorJobService {
 
     private static final String FALLA_CICLO = "ciclo";
     private static final String FALLA_SIN_SITIO = "sin-sitio";
+    private static final String FALLA_ON_POSTERGADO = "on-postergado";
+    /** Tolerancia de redondeo al comparar potencias (la misma idea que en el core). */
+    private static final double TOLERANCIA_KW = 1e-9;
 
     private ScheduledFuture<?> tareaProgramada;
     private final FallasActivas fallas = new FallasActivas();
     private volatile List<String> ultimoSinLecturas = List.of();
+    /** Hasta dónde se mira la tarifa punta: si empieza antes, se apaga ya (ver {@link #iniciarMotor}). */
+    private volatile Duration anticipacionPunta = Duration.ZERO;
 
     public EvaluadorJobService(
             SitioRepository sitioRepository,
@@ -95,7 +104,11 @@ public class EvaluadorJobService {
     public synchronized EstadoControl iniciarMotor(Instant fechaHora, double factorTiempo) {
         cancelarTarea();
         reloj.sincronizar(fechaHora, factorTiempo);
+        switchClient.olvidarEstados(); // al arrancar no se confía en lo que se sabía: se relee cada switch
         long intervaloReal = Math.max(INTERVALO_MINIMO_REAL_MS, (long) (INTERVALO_LOGICO_MS / factorTiempo));
+        // Dos ciclos simulados: el próximo y un margen por la demora del ciclo y de los comandos. Así ningún
+        // calefactor queda encendido dentro de la punta esperando a que el ciclo siguiente la detecte
+        anticipacionPunta = Duration.ofMillis((long) (intervaloReal * factorTiempo)).multipliedBy(2);
         tareaProgramada = scheduler.scheduleAtFixedRate(this::ejecutarCicloDeControl, Duration.ofMillis(intervaloReal));
         LOG.info("Control iniciado: hora simulada {} (×{}, un ciclo cada {} ms)",
                 horaSimulada(fechaHora.atZone(RelojControl.ZONA_LOCAL)),
@@ -135,7 +148,6 @@ public class EvaluadorJobService {
     private void ciclo() {
         Optional<InventarioDTO> inventario = sitioRepository.obtenerInventario();
         ZonedDateTime ahora = reloj.ahora();
-        apagarSwitchesRetirados(ahora);
         if (inventario.isEmpty()) {
             if (fallas.empezo(FALLA_SIN_SITIO)) {
                 LOG.warn("No hay un sitio cargado: el control espera el PUT /sitio del simulador");
@@ -146,41 +158,25 @@ public class EvaluadorJobService {
         evaluar(inventario.get(), ahora);
     }
 
-    /**
-     * Apaga los switches de las habitaciones que salieron del inventario: si no, seguirían encendidos sin que
-     * nadie los controle y fuera de la cuenta de potencia. Los pendientes están en la base (los anota el
-     * {@code PUT /sitio}), así que sobreviven a un reinicio del engine. Se reintenta en cada ciclo hasta
-     * lograrlo; si el switch ya no existe en el simulador, no hay nada que apagar.
-     */
-    private void apagarSwitchesRetirados(ZonedDateTime ahora) {
-        for (String idSwitch : sitioRepository.switchesPendientesDeApagar()) {
-            Resultado resultado = switchClient.comandarSwitch(idSwitch, AccionSwitch.OFF.name());
-            if (resultado == Resultado.APLICADO) {
-                sitioRepository.quitarPendienteDeApagar(idSwitch);
-                LOG.info("[simulado {}] {} → OFF (su habitación ya no está en el inventario)",
-                        horaSimulada(ahora), idSwitch);
-            } else if (resultado == Resultado.INEXISTENTE) {
-                sitioRepository.quitarPendienteDeApagar(idSwitch);
-                LOG.info("{} salió del inventario y no existe en el simulador: no hay nada que apagar", idSwitch);
-            }
-        }
-    }
-
     private void evaluar(InventarioDTO inventario, ZonedDateTime ahora) {
         Map<String, Lectura> lecturas = historicoRepository.ultimasLecturas();
-        Map<String, String> switchPorHabitacion = new HashMap<>();
+        Map<String, Habitacion> porId = new HashMap<>();
         List<HabitacionDTO> habitaciones = new ArrayList<>();
         List<String> sinLecturasVigentes = new ArrayList<>();
+        // Todos los switches a la vez: uno que no contesta no demora la consulta de los demás
+        List<EstadoSwitch> estados = enParalelo(inventario.habitaciones(),
+                hab -> switchClient.consultarEstado(hab.urlSwitch(), hab.idSwitch()));
 
-        for (Habitacion hab : inventario.habitaciones()) {
-            switchPorHabitacion.put(hab.id(), hab.idSwitch());
+        for (int i = 0; i < inventario.habitaciones().size(); i++) {
+            Habitacion hab = inventario.habitaciones().get(i);
+            porId.put(hab.id(), hab);
             Double temperatura = temperaturaVigente(lecturas.get(hab.id()));
             if (temperatura == null) {
                 sinLecturasVigentes.add(hab.id());
                 temperatura = TEMPERATURA_FAIL_SAFE;
             }
             habitaciones.add(new HabitacionDTO(hab.id(), hab.temperaturaEsperada(), temperatura, hab.potenciaKW(),
-                    switchClient.consultarEstado(hab.idSwitch())));
+                    estados.get(i)));
         }
 
         avisarSinLecturas(sinLecturasVigentes, ahora);
@@ -189,22 +185,106 @@ public class EvaluadorJobService {
                     inventario.sitio().potenciaContratadaKW(), habitaciones);
         }
 
-        Salida salida = evaluadorCore.evaluarEstado(ahora, inventario.sitio().potenciaContratadaKW(),
-                tarifaPunta(inventario.sitio().tarifa().punta()), habitaciones);
+        Salida salida = evaluadorCore.evaluarEstado(ahora, anticipacionPunta,
+                inventario.sitio().potenciaContratadaKW(), tarifaPunta(inventario.sitio().tarifa().punta()),
+                habitaciones);
 
+        double contratada = inventario.sitio().potenciaContratadaKW();
         Map<String, EstadoSwitch> estadoFinal = new LinkedHashMap<>();
         habitaciones.forEach(h -> estadoFinal.put(h.id(), h.estadoActual()));
         List<String> cambios = new ArrayList<>();
-        for (Orden orden : salida.ordenes()) {
-            String idSwitch = switchPorHabitacion.get(orden.idHabitacion());
-            if (switchClient.comandarSwitch(idSwitch, orden.accion().name()) == Resultado.APLICADO) {
+        // Primero todos los apagados, a la vez, y recién cuando terminan los encendidos: así la potencia se libera
+        // antes de volver a ocuparla, y un switch que no contesta no demora a los demás
+        comandar(ordenes(salida, AccionSwitch.OFF), porId, estadoFinal, cambios);
+
+        List<Orden> encendidos = new ArrayList<>();
+        List<String> postergadas = new ArrayList<>();
+        for (Orden orden : ordenes(salida, AccionSwitch.ON)) {
+            Habitacion hab = porId.get(orden.idHabitacion());
+            if (potenciaOcupada(habitaciones, estadoFinal, hab.id()) + hab.potenciaKW() > contratada + TOLERANCIA_KW) {
+                // El core contó con la potencia de un apagado que no se pudo confirmar: encender ahora pasaría
+                // la contratada. Se reintenta en el ciclo siguiente, con el estado real de los switches.
+                postergadas.add(orden.idHabitacion());
+                continue;
+            }
+            encendidos.add(orden);
+            estadoFinal.put(orden.idHabitacion(), EstadoSwitch.DESCONOCIDO); // ya cuenta para los siguientes
+        }
+        comandar(encendidos, porId, estadoFinal, cambios);
+        avisarPostergadas(postergadas, ahora);
+        if (!cambios.isEmpty()) {
+            resumirCiclo(ahora, cambios, estadoFinal, habitaciones, contratada);
+        }
+    }
+
+    private static List<Orden> ordenes(Salida salida, AccionSwitch accion) {
+        return salida.ordenes().stream().filter(orden -> orden.accion() == accion).toList();
+    }
+
+    /**
+     * Envía las órdenes a la vez y anota cómo queda cada switch. Lo que no se pudo confirmar queda desconocido:
+     * no se sabe si el comando llegó, y lo que no se pudo apagar se cuenta como encendido.
+     */
+    private void comandar(List<Orden> ordenes, Map<String, Habitacion> porId, Map<String, EstadoSwitch> estadoFinal,
+            List<String> cambios) {
+        List<Resultado> resultados = enParalelo(ordenes, orden -> {
+            Habitacion hab = porId.get(orden.idHabitacion());
+            return switchClient.comandarSwitch(hab.urlSwitch(), hab.idSwitch(), orden.accion().name());
+        });
+        for (int i = 0; i < ordenes.size(); i++) {
+            Orden orden = ordenes.get(i);
+            if (resultados.get(i) == Resultado.APLICADO) {
                 cambios.add(orden.idHabitacion() + " → " + orden.accion());
                 estadoFinal.put(orden.idHabitacion(),
                         orden.accion() == AccionSwitch.ON ? EstadoSwitch.ON : EstadoSwitch.OFF);
+            } else {
+                estadoFinal.put(orden.idHabitacion(), EstadoSwitch.DESCONOCIDO);
             }
         }
-        if (!cambios.isEmpty()) {
-            resumirCiclo(ahora, cambios, estadoFinal, habitaciones, inventario.sitio().potenciaContratadaKW());
+    }
+
+    /**
+     * Aplica {@code tarea} a cada elemento, todos a la vez, y devuelve los resultados en el mismo orden. Con los
+     * switches, cada tanda tarda lo que el más lento (como mucho, un timeout) y no la suma de todos: con 10 switches
+     * colgados y llamadas de a una, consultar y apagar dejaba el control ciego 20 timeouts (minutos simulados con
+     * ×60).
+     */
+    private static <T, R> List<R> enParalelo(List<T> elementos, Function<T, R> tarea) {
+        if (elementos.size() < 2) {
+            return elementos.stream().map(tarea).toList();
+        }
+        try (ExecutorService hilos = Executors.newVirtualThreadPerTaskExecutor()) {
+            List<CompletableFuture<R>> pendientes = elementos.stream()
+                    .map(elemento -> CompletableFuture.supplyAsync(() -> tarea.apply(elemento), hilos))
+                    .toList();
+            return pendientes.stream().map(CompletableFuture::join).toList();
+        }
+    }
+
+    /**
+     * Potencia que puede estar en uso sin contar a {@code excepto}: la de las habitaciones encendidas y la de las
+     * que tienen un estado desconocido (por ejemplo, un apagado que no se pudo confirmar).
+     */
+    private static double potenciaOcupada(List<HabitacionDTO> habitaciones, Map<String, EstadoSwitch> estado,
+            String excepto) {
+        return habitaciones.stream()
+                .filter(h -> !h.id().equals(excepto) && estado.get(h.id()) != EstadoSwitch.OFF)
+                .mapToDouble(HabitacionDTO::potenciaKW)
+                .sum();
+    }
+
+    /** Avisa una vez cuando se empiezan a postergar encendidos y otra cuando se vuelve a encender normalmente. */
+    private void avisarPostergadas(List<String> postergadas, ZonedDateTime ahora) {
+        if (postergadas.isEmpty()) {
+            if (fallas.termino(FALLA_ON_POSTERGADO)) {
+                LOG.info("[simulado {}] Los apagados se vuelven a confirmar: se enciende lo que entra",
+                        horaSimulada(ahora));
+            }
+            return;
+        }
+        if (fallas.empezo(FALLA_ON_POSTERGADO)) {
+            LOG.warn("[simulado {}] No se enciende {}: un apagado no se pudo confirmar y esa potencia sigue "
+                    + "ocupada (se reintenta en cada ciclo)", horaSimulada(ahora), String.join(", ", postergadas));
         }
     }
 

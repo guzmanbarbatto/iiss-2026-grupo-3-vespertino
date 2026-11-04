@@ -42,6 +42,9 @@ import org.mockito.quality.Strictness;
 class EcoWarmToolsTest {
 
     private static final Instant T1 = Instant.parse("2026-10-01T09:00:00Z");
+    /** Cada habitación declara dónde está su switch: pueden estar en servidores distintos (§3 y §4). */
+    private static final String URL_1 = "http://simulador:9090";
+    private static final String URL_2 = "http://edificio-b:9090";
 
     @Mock private EngineClient engineClient;
     @Mock private SimuladorClient simuladorClient;
@@ -57,9 +60,9 @@ class EcoWarmToolsTest {
                 new Sitio("sitio-1", "Casa", 5.0, new Tarifa(new TarifaPunta("18:00", "22:00", "HABILES"))),
                 List.of(
                         new Habitacion("hab-1", "Cuarto 1", 20.0, 2.0, "ht-1", "ht-1/status/temperature:0",
-                                "sw-1", "u"),
+                                "sw-1", URL_1),
                         new Habitacion("hab-2", "Cuarto 2", 22.0, 3.0, "ht-2", "ht-2/status/temperature:0",
-                                "sw-2", "u")));
+                                "sw-2", URL_2)));
         when(engineClient.obtenerSitio()).thenReturn(Optional.of(inventario));
         when(engineClient.obtenerControl()).thenReturn(new EstadoControl("DETENIDO", null, null, null));
     }
@@ -77,8 +80,8 @@ class EcoWarmToolsTest {
     void estadoHabitacionesCombinaTemperaturasSwitchesYPotencia() {
         when(temperaturaRepository.ultimasLecturas())
                 .thenReturn(Map.of("hab-1", new Lectura("hab-1", T1, 18.5)));
-        when(simuladorClient.consultarSwitch("sw-1")).thenReturn(new EstadoSwitch("sw-1", "ON", null));
-        when(simuladorClient.consultarSwitch("sw-2")).thenReturn(new EstadoSwitch("sw-2", "OFF", null));
+        when(simuladorClient.consultarSwitch(URL_1, "sw-1")).thenReturn(new EstadoSwitch("sw-1", "ON", null));
+        when(simuladorClient.consultarSwitch(URL_2, "sw-2")).thenReturn(new EstadoSwitch("sw-2", "OFF", null));
 
         EstadoHabitaciones estado = tools.consultarEstadoHabitaciones(null);
 
@@ -102,8 +105,9 @@ class EcoWarmToolsTest {
     @Test
     void estadoHabitacionesToleraFallasDeSwitchYBaseDeDatos() {
         when(temperaturaRepository.ultimasLecturas()).thenThrow(new ServicioExternoException("BD caída"));
-        when(simuladorClient.consultarSwitch("sw-1")).thenThrow(new ServicioExternoException("simulador caído"));
-        when(simuladorClient.consultarSwitch("sw-2")).thenReturn(new EstadoSwitch("sw-2", "ON", null));
+        when(simuladorClient.consultarSwitch(URL_1, "sw-1"))
+                .thenThrow(new ServicioExternoException("simulador caído"));
+        when(simuladorClient.consultarSwitch(URL_2, "sw-2")).thenReturn(new EstadoSwitch("sw-2", "ON", null));
 
         EstadoHabitaciones estado = tools.consultarEstadoHabitaciones(null);
 
@@ -115,7 +119,8 @@ class EcoWarmToolsTest {
     @Test
     void estadoHabitacionesFiltraPorIdPeroCalculaPotenciaDeTodaLaCasa() {
         when(temperaturaRepository.ultimasLecturas()).thenReturn(Map.of());
-        when(simuladorClient.consultarSwitch(anyString())).thenReturn(new EstadoSwitch("x", "ON", null));
+        when(simuladorClient.consultarSwitch(anyString(), anyString()))
+                .thenReturn(new EstadoSwitch("x", "ON", null));
 
         EstadoHabitaciones estado = tools.consultarEstadoHabitaciones("hab-2");
 
@@ -172,7 +177,7 @@ class EcoWarmToolsTest {
 
     @Test
     void accionarSwitchComandaElSwitchDeLaHabitacion() {
-        when(simuladorClient.comandarSwitch("sw-2", true))
+        when(simuladorClient.comandarSwitch(URL_2, "sw-2", true))
                 .thenReturn(new RespuestaComando("sw-2", "ON", true, "2026-10-01T09:15:03.120Z"));
 
         ResultadoAccionSwitch r = tools.accionarSwitch("hab-2", true);
@@ -186,7 +191,7 @@ class EcoWarmToolsTest {
     @Test
     void accionarSwitchAdvierteSiElControlAutomaticoEstaCorriendo() {
         when(engineClient.obtenerControl()).thenReturn(new EstadoControl("EN_EJECUCION", "f", 1.0, "i"));
-        when(simuladorClient.comandarSwitch("sw-1", false))
+        when(simuladorClient.comandarSwitch(URL_1, "sw-1", false))
                 .thenReturn(new RespuestaComando("sw-1", "OFF", false, "t"));
 
         ResultadoAccionSwitch r = tools.accionarSwitch("hab-1", false);
@@ -198,7 +203,23 @@ class EcoWarmToolsTest {
     void accionarSwitchConHabitacionInexistenteNoComanda() {
         assertThatThrownBy(() -> tools.accionarSwitch("hab-9", true))
                 .isInstanceOf(IllegalArgumentException.class);
-        verify(simuladorClient, never()).comandarSwitch(anyString(), anyBoolean());
+        verify(simuladorClient, never()).comandarSwitch(anyString(), anyString(), anyBoolean());
+    }
+
+    @Test
+    void cadaSwitchSeConsultaYSeComandaEnElUrlSwitchDeSuHabitacion() {
+        when(temperaturaRepository.ultimasLecturas()).thenReturn(Map.of());
+        when(simuladorClient.consultarSwitch(anyString(), anyString()))
+                .thenReturn(new EstadoSwitch("x", "OFF", null));
+        when(simuladorClient.comandarSwitch(anyString(), anyString(), anyBoolean()))
+                .thenReturn(new RespuestaComando("sw-2", "ON", true, "t"));
+
+        tools.consultarEstadoHabitaciones(null);
+        tools.accionarSwitch("hab-2", true);
+
+        verify(simuladorClient).consultarSwitch(URL_1, "sw-1");
+        verify(simuladorClient).consultarSwitch(URL_2, "sw-2");
+        verify(simuladorClient).comandarSwitch(URL_2, "sw-2", true);
     }
 }
 

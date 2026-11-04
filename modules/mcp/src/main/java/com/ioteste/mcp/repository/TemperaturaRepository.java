@@ -21,13 +21,17 @@ import org.springframework.stereotype.Repository;
 @Repository
 public class TemperaturaRepository {
 
-    /** Última lectura por habitación con una búsqueda por índice, sin recorrer todo el histórico. */
+    /**
+     * Última lectura por habitación con una búsqueda por índice, sin recorrer todo el histórico. Como en el
+     * engine, es la que llegó última ({@code recibida_en}), no la de hora simulada mayor: cada INICIAR puede
+     * volver el reloj simulado atrás. Las filas sin {@code recibida_en} usan su {@code fecha_hora}.
+     */
     private static final String SQL_ULTIMAS = """
             SELECT h.id AS habitacion_id, ult.fecha_hora, ult.temperatura_c
             FROM habitacion h
             JOIN LATERAL (
                 SELECT fecha_hora, temperatura_c FROM historico_temperatura
-                WHERE habitacion_id = h.id ORDER BY fecha_hora DESC LIMIT 1
+                WHERE habitacion_id = h.id ORDER BY COALESCE(recibida_en, fecha_hora) DESC LIMIT 1
             ) ult ON true
             """;
 
@@ -35,7 +39,7 @@ public class TemperaturaRepository {
             SELECT habitacion_id, fecha_hora, temperatura_c
             FROM historico_temperatura
             WHERE habitacion_id = ?
-            ORDER BY fecha_hora DESC
+            ORDER BY COALESCE(recibida_en, fecha_hora) DESC
             LIMIT ?
             """;
 

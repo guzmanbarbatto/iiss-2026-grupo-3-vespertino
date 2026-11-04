@@ -30,7 +30,10 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -49,6 +52,7 @@ import org.springframework.scheduling.TaskScheduler;
 @ExtendWith(MockitoExtension.class)
 class EvaluadorJobServiceTest {
 
+    private static final String URL_SW = "http://simulador:9090";
     private static final Instant MARTES_10HS = local(2026, 10, 6, 10, 0);
     private static final Instant LUNES_18HS = local(2026, 10, 5, 18, 0);
     private static final Instant INSTANTE_REAL = Instant.parse("2026-11-03T15:00:00Z");
@@ -69,7 +73,8 @@ class EvaluadorJobServiceTest {
                 new RelojControl(clock), scheduler);
         lenient().doReturn(tarea).when(scheduler).scheduleAtFixedRate(any(Runnable.class), any(Duration.class));
         lenient().when(historicoRepository.ultimasLecturas()).thenReturn(lecturas);
-        lenient().when(switchClient.comandarSwitch(anyString(), anyString())).thenReturn(Resultado.APLICADO);
+        lenient().when(switchClient.comandarSwitch(anyString(), anyString(), anyString()))
+                .thenReturn(Resultado.APLICADO);
     }
 
     // ---------------------------------------------------------------- reglas fuera de punta
@@ -79,12 +84,12 @@ class EvaluadorJobServiceTest {
         iniciarEn(MARTES_10HS);
         sitio(10.0, habitacion("1", 20.0, 2.0));
         lectura("1", 25.0);
-        when(switchClient.consultarEstado("sw-1")).thenReturn(EstadoSwitch.ON);
+        when(switchClient.consultarEstado(URL_SW, "sw-1")).thenReturn(EstadoSwitch.ON);
 
         motor.ejecutarCicloDeControl();
 
-        verify(switchClient).comandarSwitch("sw-1", "OFF");
-        verify(switchClient, never()).comandarSwitch("sw-1", "ON");
+        verify(switchClient).comandarSwitch(URL_SW, "sw-1", "OFF");
+        verify(switchClient, never()).comandarSwitch(URL_SW, "sw-1", "ON");
     }
 
     @Test
@@ -92,11 +97,11 @@ class EvaluadorJobServiceTest {
         iniciarEn(MARTES_10HS);
         sitio(10.0, habitacion("1", 22.0, 2.0));
         lectura("1", 15.0);
-        when(switchClient.consultarEstado("sw-1")).thenReturn(EstadoSwitch.OFF);
+        when(switchClient.consultarEstado(URL_SW, "sw-1")).thenReturn(EstadoSwitch.OFF);
 
         motor.ejecutarCicloDeControl();
 
-        verify(switchClient).comandarSwitch("sw-1", "ON");
+        verify(switchClient).comandarSwitch(URL_SW, "sw-1", "ON");
     }
 
     @Test
@@ -104,11 +109,11 @@ class EvaluadorJobServiceTest {
         iniciarEn(MARTES_10HS);
         sitio(1.0, habitacion("1", 22.0, 2.0));
         lectura("1", 15.0);
-        when(switchClient.consultarEstado("sw-1")).thenReturn(EstadoSwitch.OFF);
+        when(switchClient.consultarEstado(URL_SW, "sw-1")).thenReturn(EstadoSwitch.OFF);
 
         motor.ejecutarCicloDeControl();
 
-        verify(switchClient, never()).comandarSwitch(anyString(), anyString());
+        verify(switchClient, never()).comandarSwitch(anyString(), anyString(), anyString());
     }
 
     // ---------------------------------------------------------------- tarifa punta y reloj lógico
@@ -119,13 +124,13 @@ class EvaluadorJobServiceTest {
         sitio(10.0, habitacion("1", 22.0, 2.0), habitacion("2", 22.0, 2.0));
         lectura("1", 15.0);
         lectura("2", 15.0);
-        when(switchClient.consultarEstado("sw-1")).thenReturn(EstadoSwitch.ON);
-        when(switchClient.consultarEstado("sw-2")).thenReturn(EstadoSwitch.OFF);
+        when(switchClient.consultarEstado(URL_SW, "sw-1")).thenReturn(EstadoSwitch.ON);
+        when(switchClient.consultarEstado(URL_SW, "sw-2")).thenReturn(EstadoSwitch.OFF);
 
         motor.ejecutarCicloDeControl();
 
-        verify(switchClient).comandarSwitch("sw-1", "OFF");
-        verify(switchClient, never()).comandarSwitch(anyString(), eq("ON"));
+        verify(switchClient).comandarSwitch(URL_SW, "sw-1", "OFF");
+        verify(switchClient, never()).comandarSwitch(anyString(), anyString(), eq("ON"));
     }
 
     @Test
@@ -133,13 +138,38 @@ class EvaluadorJobServiceTest {
         Instant lunes1659 = local(2026, 10, 5, 16, 59);
         motor.iniciarMotor(lunes1659, 60.0);
         sitio(10.0, habitacion("1", 22.0, 2.0));
-        when(switchClient.consultarEstado("sw-1")).thenReturn(EstadoSwitch.ON);
+        when(switchClient.consultarEstado(URL_SW, "sw-1")).thenReturn(EstadoSwitch.ON);
 
         clock.avanzar(Duration.ofSeconds(2)); // 2 s reales x 60 = 16:59 + 2 min = 17:01 lógico
         lectura("1", 15.0);
         motor.ejecutarCicloDeControl();
 
-        verify(switchClient).comandarSwitch("sw-1", "OFF");
+        verify(switchClient).comandarSwitch(URL_SW, "sw-1", "OFF");
+    }
+
+    @Test
+    void siLaPuntaEmpiezaAntesDelProximoCicloApagaYaParaNoEntrarEncendido() {
+        // A ×1 el ciclo corre cada 30 s: a las 16:59:30 del lunes la punta empieza antes del próximo
+        iniciarEn(local(2026, 10, 5, 16, 59).plusSeconds(30));
+        sitio(10.0, habitacion("1", 22.0, 2.0));
+        lectura("1", 15.0);
+        when(switchClient.consultarEstado(URL_SW, "sw-1")).thenReturn(EstadoSwitch.ON);
+
+        motor.ejecutarCicloDeControl();
+
+        verify(switchClient).comandarSwitch(URL_SW, "sw-1", "OFF");
+    }
+
+    @Test
+    void unosMinutosAntesDeLaPuntaSigueControlandoNormalmente() {
+        iniciarEn(local(2026, 10, 5, 16, 57));
+        sitio(10.0, habitacion("1", 22.0, 2.0));
+        lectura("1", 15.0);
+        when(switchClient.consultarEstado(URL_SW, "sw-1")).thenReturn(EstadoSwitch.OFF);
+
+        motor.ejecutarCicloDeControl();
+
+        verify(switchClient).comandarSwitch(URL_SW, "sw-1", "ON");
     }
 
     @Test
@@ -149,11 +179,11 @@ class EvaluadorJobServiceTest {
                 new Sitio("s", "Casa", 10.0, new Tarifa(new Franja("17:00", "23:00", "MONDAY,TUESDAY"))),
                 List.of(habitacion("1", 22.0, 2.0)))));
         lectura("1", 15.0);
-        when(switchClient.consultarEstado("sw-1")).thenReturn(EstadoSwitch.ON);
+        when(switchClient.consultarEstado(URL_SW, "sw-1")).thenReturn(EstadoSwitch.ON);
 
         motor.ejecutarCicloDeControl();
 
-        verify(switchClient, never()).comandarSwitch(anyString(), anyString());
+        verify(switchClient, never()).comandarSwitch(anyString(), anyString(), anyString());
     }
 
     // ---------------------------------------------------------------- fail-safe de termostatos
@@ -163,11 +193,11 @@ class EvaluadorJobServiceTest {
         iniciarEn(MARTES_10HS);
         sitio(10.0, habitacion("1", 22.0, 2.0));
         lecturaRecibidaHace("1", 15.0, Duration.ofMinutes(11));
-        when(switchClient.consultarEstado("sw-1")).thenReturn(EstadoSwitch.ON);
+        when(switchClient.consultarEstado(URL_SW, "sw-1")).thenReturn(EstadoSwitch.ON);
 
         motor.ejecutarCicloDeControl();
 
-        verify(switchClient).comandarSwitch("sw-1", "OFF");
+        verify(switchClient).comandarSwitch(URL_SW, "sw-1", "OFF");
     }
 
     @Test
@@ -175,11 +205,11 @@ class EvaluadorJobServiceTest {
         iniciarEn(MARTES_10HS);
         sitio(10.0, habitacion("1", 22.0, 2.0));
         lecturaRecibidaHace("1", 15.0, Duration.ofMinutes(9));
-        when(switchClient.consultarEstado("sw-1")).thenReturn(EstadoSwitch.OFF);
+        when(switchClient.consultarEstado(URL_SW, "sw-1")).thenReturn(EstadoSwitch.OFF);
 
         motor.ejecutarCicloDeControl();
 
-        verify(switchClient).comandarSwitch("sw-1", "ON");
+        verify(switchClient).comandarSwitch(URL_SW, "sw-1", "ON");
     }
 
     @Test
@@ -189,11 +219,11 @@ class EvaluadorJobServiceTest {
         motor.iniciarMotor(MARTES_10HS, 600.0);
         sitio(10.0, habitacion("1", 22.0, 2.0));
         lecturaRecibidaHace("1", 15.0, Duration.ofSeconds(10), Duration.ofSeconds(5));
-        when(switchClient.consultarEstado("sw-1")).thenReturn(EstadoSwitch.OFF);
+        when(switchClient.consultarEstado(URL_SW, "sw-1")).thenReturn(EstadoSwitch.OFF);
 
         motor.ejecutarCicloDeControl();
 
-        verify(switchClient).comandarSwitch("sw-1", "ON");
+        verify(switchClient).comandarSwitch(URL_SW, "sw-1", "ON");
     }
 
     @Test
@@ -201,11 +231,11 @@ class EvaluadorJobServiceTest {
         motor.iniciarMotor(MARTES_10HS, 600.0);
         sitio(10.0, habitacion("1", 22.0, 2.0));
         lecturaRecibidaHace("1", 15.0, Duration.ofSeconds(16), Duration.ofSeconds(5));
-        when(switchClient.consultarEstado("sw-1")).thenReturn(EstadoSwitch.ON);
+        when(switchClient.consultarEstado(URL_SW, "sw-1")).thenReturn(EstadoSwitch.ON);
 
         motor.ejecutarCicloDeControl();
 
-        verify(switchClient).comandarSwitch("sw-1", "OFF");
+        verify(switchClient).comandarSwitch(URL_SW, "sw-1", "OFF");
     }
 
     @Test
@@ -214,11 +244,11 @@ class EvaluadorJobServiceTest {
         motor.iniciarMotor(MARTES_10HS, 600.0);
         sitio(10.0, habitacion("1", 22.0, 2.0));
         lecturaRecibidaHace("1", 15.0, Duration.ofSeconds(45), Duration.ofSeconds(30));
-        when(switchClient.consultarEstado("sw-1")).thenReturn(EstadoSwitch.OFF);
+        when(switchClient.consultarEstado(URL_SW, "sw-1")).thenReturn(EstadoSwitch.OFF);
 
         motor.ejecutarCicloDeControl();
 
-        verify(switchClient).comandarSwitch("sw-1", "ON");
+        verify(switchClient).comandarSwitch(URL_SW, "sw-1", "ON");
     }
 
     @Test
@@ -243,13 +273,13 @@ class EvaluadorJobServiceTest {
     void sinLecturasApagaLoEncendidoYNoEnciendeLoApagado() {
         iniciarEn(MARTES_10HS);
         sitio(10.0, habitacion("1", 22.0, 2.0), habitacion("2", 22.0, 2.0));
-        when(switchClient.consultarEstado("sw-1")).thenReturn(EstadoSwitch.ON);
-        when(switchClient.consultarEstado("sw-2")).thenReturn(EstadoSwitch.OFF);
+        when(switchClient.consultarEstado(URL_SW, "sw-1")).thenReturn(EstadoSwitch.ON);
+        when(switchClient.consultarEstado(URL_SW, "sw-2")).thenReturn(EstadoSwitch.OFF);
 
         motor.ejecutarCicloDeControl();
 
-        verify(switchClient).comandarSwitch("sw-1", "OFF");
-        verify(switchClient, never()).comandarSwitch(eq("sw-2"), anyString());
+        verify(switchClient).comandarSwitch(URL_SW, "sw-1", "OFF");
+        verify(switchClient, never()).comandarSwitch(anyString(), eq("sw-2"), anyString());
     }
 
     @Test
@@ -258,77 +288,29 @@ class EvaluadorJobServiceTest {
         iniciarEn(MARTES_10HS);
         sitio(10.0, habitacion("1", 22.0, 2.0));
         lecturas.put("hab-1", new Lectura(Instant.parse("2020-01-01T00:00:00Z"), clock.instant(), 15.0));
-        when(switchClient.consultarEstado("sw-1")).thenReturn(EstadoSwitch.OFF);
+        when(switchClient.consultarEstado(URL_SW, "sw-1")).thenReturn(EstadoSwitch.OFF);
 
         motor.ejecutarCicloDeControl();
 
-        verify(switchClient).comandarSwitch("sw-1", "ON");
-    }
-
-    // ---------------------------------------------------------------- habitaciones retiradas del inventario
-
-    @Test
-    @ExtendWith(OutputCaptureExtension.class)
-    void elSwitchDeUnaHabitacionRetiradaSeApagaYDejaDeEstarPendiente(CapturedOutput salida) {
-        iniciarEn(MARTES_10HS);
-        when(sitioRepository.switchesPendientesDeApagar()).thenReturn(List.of("sw-9"), List.of());
-        when(sitioRepository.obtenerInventario()).thenReturn(Optional.empty());
-
-        motor.ejecutarCicloDeControl();
-        motor.ejecutarCicloDeControl();
-
-        verify(switchClient, times(1)).comandarSwitch("sw-9", "OFF");
-        verify(sitioRepository).quitarPendienteDeApagar("sw-9");
-        assertThat(salida.getOut()).contains("sw-9 → OFF (su habitación ya no está en el inventario)");
-    }
-
-    @Test
-    void siNoSePudoApagarElSwitchRetiradoSigueAnotadoYSeReintenta() {
-        iniciarEn(MARTES_10HS);
-        when(sitioRepository.switchesPendientesDeApagar()).thenReturn(List.of("sw-9"), List.of("sw-9"), List.of());
-        when(sitioRepository.obtenerInventario()).thenReturn(Optional.empty());
-        when(switchClient.comandarSwitch("sw-9", "OFF")).thenReturn(Resultado.FALLIDO, Resultado.APLICADO);
-
-        motor.ejecutarCicloDeControl();
-        verify(sitioRepository, never()).quitarPendienteDeApagar(anyString());
-        motor.ejecutarCicloDeControl();
-        motor.ejecutarCicloDeControl();
-
-        verify(switchClient, times(2)).comandarSwitch("sw-9", "OFF");
-        verify(sitioRepository, times(1)).quitarPendienteDeApagar("sw-9");
-    }
-
-    @Test
-    @ExtendWith(OutputCaptureExtension.class)
-    void siElSwitchRetiradoNoExisteEnElSimuladorSeDescarta(CapturedOutput salida) {
-        // Pasa con bases de la versión anterior: la semilla tenía switches que el simulador no conoce
-        iniciarEn(MARTES_10HS);
-        when(sitioRepository.switchesPendientesDeApagar()).thenReturn(List.of("sw-room6"));
-        when(sitioRepository.obtenerInventario()).thenReturn(Optional.empty());
-        when(switchClient.comandarSwitch("sw-room6", "OFF")).thenReturn(Resultado.INEXISTENTE);
-
-        motor.ejecutarCicloDeControl();
-
-        verify(sitioRepository).quitarPendienteDeApagar("sw-room6");
-        assertThat(salida.getOut()).contains("sw-room6 salió del inventario y no existe en el simulador");
+        verify(switchClient).comandarSwitch(URL_SW, "sw-1", "ON");
     }
 
     // ---------------------------------------------------------------- estado real de los switches
 
     @Test
-    void elEstadoDelSwitchSeConsultaEnCadaCicloYSeCorrigeUnCambioExterno() {
+    void elEstadoDelSwitchSePideEnCadaCicloYSeCorrigeUnCambioExterno() {
         iniciarEn(MARTES_10HS);
         sitio(10.0, habitacion("1", 20.0, 2.0));
         lectura("1", 25.0);
         // Ciclo 1: apagado y caliente, nada que hacer. Entre ciclos alguien (p. ej. el MCP) lo enciende.
-        when(switchClient.consultarEstado("sw-1")).thenReturn(EstadoSwitch.OFF, EstadoSwitch.ON);
+        when(switchClient.consultarEstado(URL_SW, "sw-1")).thenReturn(EstadoSwitch.OFF, EstadoSwitch.ON);
 
         motor.ejecutarCicloDeControl();
-        verify(switchClient, never()).comandarSwitch(anyString(), anyString());
+        verify(switchClient, never()).comandarSwitch(anyString(), anyString(), anyString());
 
         motor.ejecutarCicloDeControl();
-        verify(switchClient).comandarSwitch("sw-1", "OFF");
-        verify(switchClient, times(2)).consultarEstado("sw-1");
+        verify(switchClient).comandarSwitch(URL_SW, "sw-1", "OFF");
+        verify(switchClient, times(2)).consultarEstado(URL_SW, "sw-1");
     }
 
     @Test
@@ -336,12 +318,12 @@ class EvaluadorJobServiceTest {
         iniciarEn(MARTES_10HS);
         sitio(10.0, habitacion("1", 22.0, 2.0));
         lectura("1", 15.0);
-        when(switchClient.consultarEstado("sw-1")).thenReturn(EstadoSwitch.DESCONOCIDO, EstadoSwitch.OFF);
+        when(switchClient.consultarEstado(URL_SW, "sw-1")).thenReturn(EstadoSwitch.DESCONOCIDO, EstadoSwitch.OFF);
 
         motor.ejecutarCicloDeControl();
         motor.ejecutarCicloDeControl();
 
-        verify(switchClient, times(2)).comandarSwitch("sw-1", "ON");
+        verify(switchClient, times(2)).comandarSwitch(URL_SW, "sw-1", "ON");
     }
 
     @Test
@@ -350,12 +332,166 @@ class EvaluadorJobServiceTest {
         sitio(10.0, habitacion("1", 20.0, 2.0), habitacion("2", 20.0, 2.0));
         lectura("1", 25.0);
         lectura("2", 25.0);
-        when(switchClient.consultarEstado(anyString())).thenReturn(EstadoSwitch.ON);
-        when(switchClient.comandarSwitch("sw-1", "OFF")).thenReturn(Resultado.FALLIDO);
+        when(switchClient.consultarEstado(anyString(), anyString())).thenReturn(EstadoSwitch.ON);
+        when(switchClient.comandarSwitch(URL_SW, "sw-1", "OFF")).thenReturn(Resultado.FALLIDO);
 
         motor.ejecutarCicloDeControl();
 
-        verify(switchClient).comandarSwitch("sw-2", "OFF");
+        verify(switchClient).comandarSwitch(URL_SW, "sw-2", "OFF");
+    }
+
+    // ---------------------------------------------------------------- switches a la vez
+
+    @Test
+    void losSwitchesSeConsultanALaVezYUnoQueNoContestaNoDemoraALosDemas() {
+        iniciarEn(MARTES_10HS);
+        sitio(10.0, habitacion("1", 20.0, 2.0), habitacion("2", 20.0, 2.0), habitacion("3", 20.0, 2.0));
+        lectura("1", 25.0);
+        lectura("2", 25.0);
+        lectura("3", 25.0);
+        // Cada consulta espera a que lleguen las tres: de a una, la primera esperaría hasta vencer
+        CountDownLatch llegaron = new CountDownLatch(3);
+        List<Boolean> juntas = new CopyOnWriteArrayList<>();
+        when(switchClient.consultarEstado(eq(URL_SW), anyString())).thenAnswer(pedido -> {
+            llegaron.countDown();
+            juntas.add(llegaron.await(2, TimeUnit.SECONDS));
+            return EstadoSwitch.OFF;
+        });
+
+        motor.ejecutarCicloDeControl();
+
+        assertThat(juntas).containsExactly(true, true, true);
+    }
+
+    @Test
+    void losApagadosSalenALaVezYLosEncendidosRecienCuandoTerminan() {
+        iniciarEn(MARTES_10HS);
+        sitio(4.0, habitacion("1", 20.0, 2.0), habitacion("2", 20.0, 2.0),
+                habitacion("3", 22.0, 2.0), habitacion("4", 22.0, 2.0));
+        lectura("1", 25.0);
+        lectura("2", 25.0);
+        lectura("3", 15.0);
+        lectura("4", 15.0);
+        when(switchClient.consultarEstado(URL_SW, "sw-1")).thenReturn(EstadoSwitch.ON);
+        when(switchClient.consultarEstado(URL_SW, "sw-2")).thenReturn(EstadoSwitch.ON);
+        when(switchClient.consultarEstado(URL_SW, "sw-3")).thenReturn(EstadoSwitch.OFF);
+        when(switchClient.consultarEstado(URL_SW, "sw-4")).thenReturn(EstadoSwitch.OFF);
+        CountDownLatch apagando = new CountDownLatch(2);
+        List<String> eventos = new CopyOnWriteArrayList<>();
+        when(switchClient.comandarSwitch(eq(URL_SW), anyString(), eq("OFF"))).thenAnswer(pedido -> {
+            apagando.countDown();
+            boolean aLaVez = apagando.await(2, TimeUnit.SECONDS);
+            eventos.add("OFF " + pedido.getArgument(1) + (aLaVez ? " a la vez" : " de a uno"));
+            return Resultado.APLICADO;
+        });
+        when(switchClient.comandarSwitch(eq(URL_SW), anyString(), eq("ON"))).thenAnswer(pedido -> {
+            eventos.add("ON " + pedido.getArgument(1));
+            return Resultado.APLICADO;
+        });
+
+        motor.ejecutarCicloDeControl();
+
+        assertThat(eventos).hasSize(4);
+        assertThat(eventos.subList(0, 2)).containsExactlyInAnyOrder("OFF sw-1 a la vez", "OFF sw-2 a la vez");
+        assertThat(eventos.subList(2, 4)).containsExactlyInAnyOrder("ON sw-3", "ON sw-4");
+    }
+
+    // ---------------------------------------------------------------- apagados que no se confirman
+
+    @Test
+    void siUnApagadoNoSeConfirmaNoSeEnciendeOtraQueNoEntraria() {
+        // Hay que rotar: apagar room1 (llegó a su objetivo) para encender room2. Si el OFF no llega, room1 puede
+        // seguir encendida y encender room2 pasaría la contratada
+        iniciarEn(MARTES_10HS);
+        sitio(2.0, habitacion("1", 20.0, 2.0), habitacion("2", 22.0, 2.0));
+        lectura("1", 25.0);
+        lectura("2", 15.0);
+        when(switchClient.consultarEstado(URL_SW, "sw-1")).thenReturn(EstadoSwitch.ON);
+        when(switchClient.consultarEstado(URL_SW, "sw-2")).thenReturn(EstadoSwitch.OFF);
+        when(switchClient.comandarSwitch(URL_SW, "sw-1", "OFF")).thenReturn(Resultado.FALLIDO);
+
+        motor.ejecutarCicloDeControl();
+
+        verify(switchClient).comandarSwitch(URL_SW, "sw-1", "OFF");
+        verify(switchClient, never()).comandarSwitch(URL_SW, "sw-2", "ON");
+    }
+
+    @Test
+    void cuandoElApagadoSeConfirmaSeEnciendeLaQueEsperaba() {
+        iniciarEn(MARTES_10HS);
+        sitio(2.0, habitacion("1", 20.0, 2.0), habitacion("2", 22.0, 2.0));
+        lectura("1", 25.0);
+        lectura("2", 15.0);
+        when(switchClient.consultarEstado(URL_SW, "sw-1")).thenReturn(EstadoSwitch.ON);
+        when(switchClient.consultarEstado(URL_SW, "sw-2")).thenReturn(EstadoSwitch.OFF);
+        when(switchClient.comandarSwitch(URL_SW, "sw-1", "OFF")).thenReturn(Resultado.FALLIDO, Resultado.APLICADO);
+
+        motor.ejecutarCicloDeControl();
+        motor.ejecutarCicloDeControl();
+
+        verify(switchClient, times(2)).comandarSwitch(URL_SW, "sw-1", "OFF");
+        verify(switchClient, times(1)).comandarSwitch(URL_SW, "sw-2", "ON");
+    }
+
+    @Test
+    void unEncendidoQueEntraAunqueElApagadoFalleSeEnviaIgual() {
+        iniciarEn(MARTES_10HS);
+        sitio(4.0, habitacion("1", 20.0, 2.0), habitacion("2", 22.0, 2.0));
+        lectura("1", 25.0);
+        lectura("2", 15.0);
+        when(switchClient.consultarEstado(URL_SW, "sw-1")).thenReturn(EstadoSwitch.ON);
+        when(switchClient.consultarEstado(URL_SW, "sw-2")).thenReturn(EstadoSwitch.OFF);
+        when(switchClient.comandarSwitch(URL_SW, "sw-1", "OFF")).thenReturn(Resultado.FALLIDO);
+
+        motor.ejecutarCicloDeControl();
+
+        // room1 se cuenta encendida (2 kW) y room2 igual entra en los 4 kW
+        verify(switchClient).comandarSwitch(URL_SW, "sw-2", "ON");
+    }
+
+    @Test
+    @ExtendWith(OutputCaptureExtension.class)
+    void elEncendidoPostergadoSeAvisaUnaVezYOtraAlRecuperarse(CapturedOutput salida) {
+        iniciarEn(MARTES_10HS);
+        sitio(2.0, habitacion("1", 20.0, 2.0), habitacion("2", 22.0, 2.0));
+        lectura("1", 25.0);
+        lectura("2", 15.0);
+        when(switchClient.consultarEstado(URL_SW, "sw-1")).thenReturn(EstadoSwitch.ON);
+        when(switchClient.consultarEstado(URL_SW, "sw-2")).thenReturn(EstadoSwitch.OFF);
+        when(switchClient.comandarSwitch(URL_SW, "sw-1", "OFF"))
+                .thenReturn(Resultado.FALLIDO, Resultado.FALLIDO, Resultado.FALLIDO, Resultado.APLICADO);
+
+        for (int i = 0; i < 4; i++) {
+            motor.ejecutarCicloDeControl();
+        }
+
+        assertThat(salida.getOut().split("No se enciende hab-2", -1)).hasSize(2);
+        assertThat(salida.getOut().split("Los apagados se vuelven a confirmar", -1)).hasSize(2);
+    }
+
+    @Test
+    void cadaSwitchSeConsultaYSeComandaEnElUrlSwitchDeSuHabitacion() {
+        // §3 y §4: los switches de un sitio pueden estar en servidores distintos
+        iniciarEn(MARTES_10HS);
+        Habitacion enOtroServidor = new Habitacion("hab-2", "Cuarto 2", 22.0, 1.0, "ht-2",
+                "ht-2/status/temperature:0", "sw-2", "http://switches-b:8081");
+        sitio(10.0, habitacion("1", 22.0, 1.0), enOtroServidor);
+        lectura("1", 15.0);
+        lectura("2", 15.0);
+        when(switchClient.consultarEstado(anyString(), anyString())).thenReturn(EstadoSwitch.OFF);
+
+        motor.ejecutarCicloDeControl();
+
+        verify(switchClient).consultarEstado("http://switches-b:8081", "sw-2");
+        verify(switchClient).comandarSwitch(URL_SW, "sw-1", "ON");
+        verify(switchClient).comandarSwitch("http://switches-b:8081", "sw-2", "ON");
+    }
+
+    @Test
+    void alIniciarElControlSeReleeElEstadoDeTodosLosSwitches() {
+        motor.iniciarMotor(MARTES_10HS, 1.0);
+
+        verify(switchClient).olvidarEstados();
     }
 
     // ---------------------------------------------------------------- robustez del ciclo
@@ -367,7 +503,7 @@ class EvaluadorJobServiceTest {
 
         motor.ejecutarCicloDeControl();
 
-        verifyNoInteractions(switchClient);
+        sinTraficoConLosSwitches();
     }
 
     // ---------------------------------------------------------------- logs legibles
@@ -379,8 +515,8 @@ class EvaluadorJobServiceTest {
         sitio(3.0, habitacion("1", 22.0, 2.0), habitacion("2", 20.0, 0.8));
         lectura("1", 15.0);
         lectura("2", 25.0);
-        when(switchClient.consultarEstado("sw-1")).thenReturn(EstadoSwitch.OFF);
-        when(switchClient.consultarEstado("sw-2")).thenReturn(EstadoSwitch.ON);
+        when(switchClient.consultarEstado(URL_SW, "sw-1")).thenReturn(EstadoSwitch.OFF);
+        when(switchClient.consultarEstado(URL_SW, "sw-2")).thenReturn(EstadoSwitch.ON);
 
         motor.ejecutarCicloDeControl();
 
@@ -393,7 +529,7 @@ class EvaluadorJobServiceTest {
     void elFailSafeAvisaCuandoCambiaYNoEnCadaCiclo(CapturedOutput salida) {
         iniciarEn(MARTES_10HS);
         sitio(10.0, habitacion("1", 22.0, 2.0));
-        when(switchClient.consultarEstado("sw-1")).thenReturn(EstadoSwitch.OFF);
+        when(switchClient.consultarEstado(URL_SW, "sw-1")).thenReturn(EstadoSwitch.OFF);
 
         motor.ejecutarCicloDeControl();
         motor.ejecutarCicloDeControl();
@@ -432,7 +568,7 @@ class EvaluadorJobServiceTest {
 
         motor.ejecutarCicloDeControl();
 
-        verifyNoInteractions(switchClient);
+        sinTraficoConLosSwitches();
     }
 
     @Test
@@ -526,9 +662,15 @@ class EvaluadorJobServiceTest {
                 List.of(habitaciones))));
     }
 
+    /** El ciclo no consultó ni comandó ningún switch. */
+    private void sinTraficoConLosSwitches() {
+        verify(switchClient, never()).consultarEstado(anyString(), anyString());
+        verify(switchClient, never()).comandarSwitch(anyString(), anyString(), anyString());
+    }
+
     private static Habitacion habitacion(String n, double esperada, double potenciaKw) {
         return new Habitacion("hab-" + n, "Cuarto " + n, esperada, potenciaKw, "ht-" + n,
-                "ht-" + n + "/status/temperature:0", "sw-" + n, "http://simulador:9090");
+                "ht-" + n + "/status/temperature:0", "sw-" + n, URL_SW);
     }
 
     /** Una lectura que acaba de llegar. */

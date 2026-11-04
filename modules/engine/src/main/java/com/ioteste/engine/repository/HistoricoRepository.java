@@ -22,6 +22,9 @@ public class HistoricoRepository {
      * largo) ni por un mensaje repetido (un hueco de casi cero). Son búsquedas por índice por habitación, sin
      * recorrer el histórico. Las filas grabadas antes de que existiera {@code recibida_en} usan su
      * {@code fecha_hora}.
+     *
+     * <p>"Última" es la que llegó última, no la de hora simulada mayor: cada {@code INICIAR} puede volver el
+     * reloj simulado atrás, y las lecturas de una corrida anterior, con horas más tardías, taparían a las nuevas.
      */
     static final String SQL_ULTIMAS_LECTURAS = """
             SELECT h.id, ult.fecha_hora, ult.recibida_en, ult.temperatura_c, ritmo.segundos AS ritmo_s
@@ -29,7 +32,7 @@ public class HistoricoRepository {
             JOIN LATERAL (
                 SELECT fecha_hora, COALESCE(recibida_en, fecha_hora) AS recibida_en, temperatura_c
                 FROM historico_temperatura
-                WHERE habitacion_id = h.id ORDER BY fecha_hora DESC LIMIT 1
+                WHERE habitacion_id = h.id ORDER BY COALESCE(recibida_en, fecha_hora) DESC LIMIT 1
             ) ult ON true
             CROSS JOIN LATERAL (
                 SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY hueco) AS segundos
@@ -38,7 +41,7 @@ public class HistoricoRepository {
                     FROM (
                         SELECT COALESCE(recibida_en, fecha_hora) AS llegada
                         FROM historico_temperatura
-                        WHERE habitacion_id = h.id ORDER BY fecha_hora DESC LIMIT 5
+                        WHERE habitacion_id = h.id ORDER BY COALESCE(recibida_en, fecha_hora) DESC LIMIT 5
                     ) recientes
                 ) huecos
                 WHERE hueco IS NOT NULL
