@@ -1,0 +1,65 @@
+%% Vista de Procesos: un ciclo de control del engine (EvaluadorJobService.ejecutarCicloDeControl).
+%% Se renderiza a ../VistaProcesosCiclo.png (ver docs/arquitectura/diagramas/README.md).
+sequenceDiagram
+    autonumber
+    box rgb(232,244,253) Engine · infraestructura
+        participant SCH as Scheduler
+        participant JOB as EvaluadorJobService
+        participant RELOJ as RelojControl
+        participant SW as SwitchClientService
+    end
+    box rgb(243,236,253) Core · dominio puro
+        participant CORE as EvaluadorCore
+    end
+    box rgb(245,245,245) Externos
+        participant DB as PostgreSQL
+        participant SIM as Switches (urlSwitch)
+    end
+
+    SCH->>JOB: ejecutarCicloDeControl()
+    Note over SCH,JOB: cada máx(500 ms, 30 s ÷ factor) reales = 30 s simulados.<br/>Si un ciclo se demora, el siguiente espera: nunca se superponen
+    JOB->>DB: obtenerInventario()
+    DB-->>JOB: sitio y habitaciones
+    JOB->>RELOJ: ahora()
+    RELOJ-->>JOB: hora simulada
+
+    opt no hay sitio cargado
+        Note over JOB: avisa una vez y termina el ciclo
+    end
+
+    JOB->>DB: ultimasLecturas()
+    DB-->>JOB: la última lectura que llegó y el ritmo de publicación de cada termostato
+    Note over JOB: lectura vigente si llegó hace ≤ máx(600 s simulados, 3 lecturas perdidas, 2 s).<br/>Si no, usa 99 °C (fail-safe): la habitación se apaga
+    loop cada habitación, todas a la vez (un switch que no contesta demora como mucho 1 s, no suma)
+        JOB->>SW: consultarEstado(urlSwitch, id)
+        alt el último estado conocido tiene menos de 5 s
+            SW-->>JOB: estado conocido, sin consultar
+        else venció o no se conoce
+            SW->>SIM: GET {urlSwitch}/switches/{id}
+            SIM-->>SW: ON / OFF
+            SW-->>JOB: estado real (si falla o pasa 1 s: DESCONOCIDO, que no se recuerda)
+        end
+    end
+
+    JOB->>CORE: evaluarEstado(hora simulada, anticipación, potencia, tarifa, habitaciones)
+    Note over CORE: tarifa punta (también si empieza antes de 2 ciclos), histéresis,<br/>y con potencia escasa la combinación que más aprovecha la contratada<br/>(entre iguales, las habitaciones más lejos de su objetivo)
+    CORE-->>JOB: Salida: órdenes, las OFF antes que las ON
+
+    loop cada OFF, todos a la vez
+        JOB->>SW: comandarSwitch(urlSwitch, id, OFF)
+        SW->>SIM: POST {urlSwitch}/switches/{id}/comandos
+        SIM-->>SW: 200 (o no responde en 1 s)
+        SW-->>JOB: APLICADO: queda como estado conocido.<br/>Si falla: se cuenta como encendida
+    end
+    Note over JOB: recién cuando terminaron todos los OFF
+    loop cada ON, todos a la vez
+        alt no entra contando lo que no se pudo apagar
+            Note over JOB: se posterga al ciclo siguiente
+        else
+            JOB->>SW: comandarSwitch(urlSwitch, id, ON)
+            SW->>SIM: POST {urlSwitch}/switches/{id}/comandos
+            SIM-->>SW: 200 (o no responde en 1 s)
+            SW-->>JOB: APLICADO: queda como estado conocido
+        end
+    end
+    Note over JOB: una línea de log por ciclo con cambios.<br/>Una excepción se avisa una vez (FallasActivas) y el ciclo siguiente reintenta

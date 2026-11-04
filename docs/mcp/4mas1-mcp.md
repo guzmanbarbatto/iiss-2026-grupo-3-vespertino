@@ -14,7 +14,7 @@ La Vista Lógica descompone el módulo `mcp` en sus responsabilidades funcionale
 
 ### Principios de Diseño
 * **Desacoplamiento por contrato:** El módulo `mcp` no importa el JAR de `engine`; se comunica únicamente a través de los contratos OpenAPI v2 (`controlador.openapi-v2.yaml` y `simulador.openapi-v2.yaml`).
-* **Segregación de lectura/operación (CQRS liviano):** Las operaciones de control e inventario pasan por la API REST del `engine`, los actuadores se consultan/comandan en el simulador, y las series temporales de temperatura se leen directamente desde PostgreSQL mediante un pool de conexiones **estrictamente de solo lectura (`read-only=true`)**.
+* **Segregación de lectura/operación (CQRS liviano):** Las operaciones de control e inventario pasan por la API REST del `engine`, los actuadores se consultan/comandan en el `urlSwitch` que declara cada habitación (como el engine), y las series temporales de temperatura se leen directamente desde PostgreSQL mediante un pool de conexiones **estrictamente de solo lectura (`read-only=true`)**.
 * **Tolerancia a fallos degradada:** Si la base de datos o un switch puntual no responde durante una consulta global, la tool no colapsa; reporta `NO_DISPONIBLE` y agrega el detalle en la lista `advertencias` para que el agente de IA pueda razonar sobre el fallo.
 
 ```mermaid
@@ -37,8 +37,8 @@ classDiagram
     }
 
     class SimuladorClient {
-        +consultarSwitch(String idSwitch) EstadoSwitch
-        +comandarSwitch(String idSwitch, boolean encender) RespuestaComando
+        +consultarSwitch(String urlSwitch, String idSwitch) EstadoSwitch
+        +comandarSwitch(String urlSwitch, String idSwitch, boolean encender) RespuestaComando
     }
 
     class TemperaturaRepository {
@@ -57,7 +57,7 @@ classDiagram
 
     McpToolsConfiguration --> EcoWarmTools : registra @Tool
     EcoWarmTools --> EngineClient : REST /sitio y /control
-    EcoWarmTools --> SimuladorClient : REST /switches/{id}
+    EcoWarmTools --> SimuladorClient : REST {urlSwitch}/switches/{id}
     EcoWarmTools --> TemperaturaRepository : JDBC Read-Only
 ```
 
@@ -129,12 +129,12 @@ sequenceDiagram
     Engine-->>MCP: 200 OK (Inventario: sitio + habitaciones)
     MCP->>DB: SELECT ... JOIN LATERAL (última lectura por habitación, por índice)
     DB-->>MCP: Últimas lecturas MQTT
-    MCP->>Sim: GET /switches/sw-room1..N (X-API-Key)
+    MCP->>Sim: GET {urlSwitch}/switches/sw-room1..N (X-API-Key)
     Sim-->>MCP: Estado de cada switch (ON / OFF / DESCONOCIDO)
     MCP-->>Agente: EstadoHabitaciones JSON (vía SSE)
 ```
 
-* **Timeouts de red:** Todos los `RestClient` hacia `engine` y `simulador` tienen `connectTimeout = 2000 ms` y `readTimeout = 5000 ms`, y el pool HikariCP tiene `connection-timeout = 3000 ms` con `maximum-pool-size = 3`.
+* **Timeouts de red:** Todos los `RestClient` hacia `engine` y los switches tienen `connectTimeout = 2000 ms` y `readTimeout = 5000 ms`, y el pool HikariCP tiene `connection-timeout = 3000 ms` con `maximum-pool-size = 3`.
 
 ---
 
@@ -157,7 +157,7 @@ flowchart TB
     INSP -- "HTTP/SSE :8081" --> MCP
     MCP -- "ENGINE_URL=http://engine:8080" --> ENG
     MCP -- "DB_URL=jdbc:postgresql://postgres-db:5432/ecowarm" --> PG
-    MCP -- "SIMULADOR_URL=http://host.docker.internal:9090" --> SIMHOST
+    MCP -- "urlSwitch de cada habitación<br/>(http://host.docker.internal:9090)" --> SIMHOST
     ENG -- "JDBC :5432" --> PG
     ENG -- "REST :9090 / MQTT :1883" --> SIMHOST
 ```
@@ -172,7 +172,7 @@ flowchart TB
 
 ### Escenario 2: Intervención manual sobre una habitación y verificación de calentamiento
 1. El agente IA invoca `accionarSwitch(habitacionId="room2", encender=true)`.
-2. `SimuladorClient` envía `POST /switches/sw-room2/comandos` con `{"accion":"ON"}` al simulador.
+2. `SimuladorClient` envía `POST {urlSwitch}/switches/sw-room2/comandos` con `{"accion":"ON"}`, en el `urlSwitch` que `room2` declara en el inventario.
 3. `EngineClient` verifica si el motor automático está `EN_EJECUCION` y anexa una advertencia preventiva en la respuesta si corresponde.
 4. Minutos después, el agente invoca `historialTemperaturas(habitacionId="room2", limite=10)` y comprueba en la serie histórica que la temperatura de la habitación está subiendo.
 

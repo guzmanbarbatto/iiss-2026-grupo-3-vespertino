@@ -7,7 +7,7 @@ import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.web.client.RestClient;
 
 /**
- * Clientes HTTP hacia el engine y el simulador.
+ * Clientes HTTP hacia el engine y los switches.
  *
  * <p>Ambos usan timeouts estrictos para que una caída de un servicio no deje colgada la tool
  * (y por lo tanto al agente de IA) esperando indefinidamente.
@@ -31,24 +31,26 @@ public class HttpClientsConfiguration {
         return construir(builder, engineUrl, engineApiKey);
     }
 
+    /** Sin URL base: cada switch se usa en la de su habitación (ver {@code SimuladorClient}). */
     @Bean
     public RestClient simuladorRestClient(
             RestClient.Builder builder,
-            @Value("${simulador.url}") String simuladorUrl,
             @Value("${simulador.api.key:}") String simuladorApiKey) {
-        return construir(builder, simuladorUrl, simuladorApiKey);
+        return conTimeouts(builder, simuladorApiKey).build();
     }
 
     private RestClient construir(RestClient.Builder builder, String baseUrl, String apiKey) {
+        return conTimeouts(builder, apiKey).baseUrl(baseUrl).build();
+    }
+
+    private RestClient.Builder conTimeouts(RestClient.Builder builder, String apiKey) {
         SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
         factory.setConnectTimeout(connectTimeoutMs);
         factory.setReadTimeout(readTimeoutMs);
 
         return builder.clone()
-                .baseUrl(baseUrl)
                 .defaultHeader(HEADER_API_KEY, apiKey)
-                .requestFactory(factory)
-                .build();
+                .requestFactory(factory);
     }
 }
 

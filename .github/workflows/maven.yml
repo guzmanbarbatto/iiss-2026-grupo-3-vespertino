@@ -7,6 +7,46 @@ on:
     branches: [ "main" ]
 
 jobs:
+  tests:
+    name: Tests completos (mvn verify)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+    - name: Checkout del repositorio
+      uses: actions/checkout@v4
+
+    - name: Java 25 (Temurin) con caché de Maven
+      uses: actions/setup-java@v4
+      with:
+        distribution: temurin
+        java-version: '25'
+        cache: maven
+
+    - name: Tests, Checkstyle y cobertura
+      # El runner tiene Docker, así que también corren los tests con PostgreSQL y Mosquitto reales
+      # (Testcontainers): los de repositorios y el de punta a punta, que dentro de docker build se omiten.
+      run: mvn -B -ntp verify
+
+    - name: Confirmar que no se omitió ningún test
+      # Los tests con Testcontainers se omiten en silencio si no hay Docker: el build quedaría en verde
+      # sin haberlos corrido (engine: repositorios y punta a punta; mcp: repositorio)
+      run: |
+        omitidos=$(grep -L 'skipped="0"' modules/*/target/surefire-reports/TEST-*.xml || true)
+        if [ -n "$omitidos" ]; then
+          echo "::error::Hay tests omitidos (¿falta Docker en el runner?)"
+          echo "$omitidos" | sed 's#.*/TEST-##; s#\.xml$##'
+          exit 1
+        fi
+        echo "Ningún test omitido: corrieron también los de PostgreSQL y Mosquitto reales"
+
+    - name: Guardar los reportes de tests si algo falló
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: reportes-de-tests
+        path: modules/*/target/surefire-reports/
+        retention-days: 7
+
   build-and-verify:
     runs-on: ubuntu-latest
     steps:
@@ -19,4 +59,5 @@ jobs:
     - name: Compilación Aislada (Multi-stage Docker)
       # BuildKit compila y testea los módulos (core, engine y mcp) dentro de
       # contenedores efímeros sin requerir Java ni Maven en el sistema host.
+      # Acá no hay Docker para Testcontainers: esos tests los corre el job "tests".
       run: ./scripts/build.sh

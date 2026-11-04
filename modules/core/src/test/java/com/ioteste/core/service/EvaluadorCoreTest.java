@@ -9,9 +9,11 @@ import com.ioteste.core.domain.TarifaPunta;
 import org.junit.jupiter.api.Test;
 
 import java.time.DayOfWeek;
+import java.time.Duration;
 import java.time.LocalTime;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 
@@ -307,6 +309,178 @@ public class EvaluadorCoreTest {
                 new Orden("B", AccionSwitch.OFF),
                 new Orden("A", AccionSwitch.ON),
                 new Orden("C", AccionSwitch.ON)), resultado.ordenes());
+    }
+
+    // 9. TESTS DE CONTRATADA QUE BAJA (lo encendido ya no entra: se apaga lo que sobra)
+    @Test
+    void casoBajaLaContratadaSeApagaLoQueSobraEmpezandoPorLaMasCercaDeSuObjetivo() {
+        HabitacionDTO habA = new HabitacionDTO("A", 21.0, 18.0, 1.2, EstadoSwitch.ON);
+        HabitacionDTO habB = new HabitacionDTO("B", 21.0, 20.8, 1.2, EstadoSwitch.ON);
+        HabitacionDTO habC = new HabitacionDTO("C", 21.0, 19.0, 1.2, EstadoSwitch.ON);
+
+        Salida resultado = new EvaluadorCore().evaluarEstado(
+                martes10hs, 2.5, tarifaHabiles, List.of(habA, habB, habC));
+
+        // 3,6 kW encendidos con 2,5 contratados: sale B (le faltan 0,2 °C); A y C (2,4 kW) entran
+        assertEquals(List.of(new Orden("B", AccionSwitch.OFF)), resultado.ordenes());
+    }
+
+    @Test
+    void casoBajaLaContratadaPorDebajoDeTodoSeApagaTodo() {
+        HabitacionDTO habA = new HabitacionDTO("A", 21.0, 18.0, 2.0, EstadoSwitch.ON);
+        HabitacionDTO habB = new HabitacionDTO("B", 21.0, 19.0, 2.0, EstadoSwitch.ON);
+
+        Salida resultado = new EvaluadorCore().evaluarEstado(martes10hs, 1.5, tarifaHabiles, List.of(habA, habB));
+
+        assertEquals(List.of(new Orden("B", AccionSwitch.OFF), new Orden("A", AccionSwitch.OFF)), resultado.ordenes());
+    }
+
+    @Test
+    void casoLoEncendidoEntraJustoNoSeApagaPorRedondeo() {
+        // 1,1 + 2,2 en double es 3,3000000000000003: no es pasarse de 3,3 kW
+        HabitacionDTO habA = new HabitacionDTO("A", 21.0, 18.0, 1.1, EstadoSwitch.ON);
+        HabitacionDTO habB = new HabitacionDTO("B", 21.0, 18.0, 2.2, EstadoSwitch.ON);
+
+        Salida resultado = new EvaluadorCore().evaluarEstado(martes10hs, 3.3, tarifaHabiles, List.of(habA, habB));
+
+        assertTrue(resultado.ordenes().isEmpty());
+    }
+
+    @Test
+    void casoUnaHabitacionQueEntraJustoSeEnciendePeseAlRedondeo() {
+        HabitacionDTO habA = new HabitacionDTO("A", 21.0, 18.0, 1.1, EstadoSwitch.ON);
+        HabitacionDTO habB = new HabitacionDTO("B", 21.0, 18.0, 2.2, EstadoSwitch.OFF);
+
+        Salida resultado = new EvaluadorCore().evaluarEstado(martes10hs, 3.3, tarifaHabiles, List.of(habA, habB));
+
+        assertEquals(List.of(new Orden("B", AccionSwitch.ON)), resultado.ordenes());
+    }
+
+    @Test
+    void casoLaQueSeApagaPorSobrarNoSeVuelveAEncenderEnElMismoCiclo() {
+        HabitacionDTO habA = new HabitacionDTO("A", 21.0, 18.0, 2.0, EstadoSwitch.ON);
+        HabitacionDTO habB = new HabitacionDTO("B", 21.0, 20.0, 2.0, EstadoSwitch.ON);
+        HabitacionDTO habC = new HabitacionDTO("C", 21.0, 15.0, 2.0, EstadoSwitch.OFF);
+
+        Salida resultado = new EvaluadorCore().evaluarEstado(
+                martes10hs, 3.0, tarifaHabiles, List.of(habA, habB, habC));
+
+        // Sobra B; C tiene más frío pero no entra junto a A
+        assertEquals(List.of(new Orden("B", AccionSwitch.OFF)), resultado.ordenes());
+    }
+
+    // 10. TESTS DE PUNTA ANTICIPADA (si empieza antes de la próxima evaluación, se apaga ya)
+    private final ZonedDateTime lunes165930 = ZonedDateTime.of(2026, 10, 5, 16, 59, 30, 0, ZoneId.of("UTC"));
+    private final Duration unMinuto = Duration.ofMinutes(1);
+
+    @Test
+    void casoLaPuntaEmpiezaAntesDeLaProximaEvaluacionApagaYa() {
+        HabitacionDTO habA = new HabitacionDTO("A", 22.0, 15.0, 2.0, EstadoSwitch.ON);
+
+        Salida resultado = new EvaluadorCore().evaluarEstado(
+                lunes165930, unMinuto, 10.0, tarifaHabiles, List.of(habA));
+
+        assertEquals(List.of(new Orden("A", AccionSwitch.OFF)), resultado.ordenes());
+    }
+
+    @Test
+    void casoLaPuntaEmpiezaAntesDeLaProximaEvaluacionNoEnciende() {
+        HabitacionDTO habA = new HabitacionDTO("A", 22.0, 15.0, 2.0, EstadoSwitch.OFF);
+
+        Salida resultado = new EvaluadorCore().evaluarEstado(
+                lunes165930, unMinuto, 10.0, tarifaHabiles, List.of(habA));
+
+        assertTrue(resultado.ordenes().isEmpty());
+    }
+
+    @Test
+    void casoLaPuntaTodaviaNoLlegaALaProximaEvaluacionSigueNormal() {
+        HabitacionDTO habA = new HabitacionDTO("A", 22.0, 15.0, 2.0, EstadoSwitch.OFF);
+
+        Salida resultado = new EvaluadorCore().evaluarEstado(
+                lunes165930.minusMinutes(2), unMinuto, 10.0, tarifaHabiles, List.of(habA));
+
+        assertEquals(List.of(new Orden("A", AccionSwitch.ON)), resultado.ordenes());
+    }
+
+    @Test
+    void casoSinAnticipacionSoloCuentaLaHoraActual() {
+        HabitacionDTO habA = new HabitacionDTO("A", 22.0, 15.0, 2.0, EstadoSwitch.ON);
+
+        Salida resultado = new EvaluadorCore().evaluarEstado(lunes165930, 10.0, tarifaHabiles, List.of(habA));
+
+        assertTrue(resultado.ordenes().isEmpty());
+    }
+
+    // 11. TESTS DE APROVECHAMIENTO (con potencia escasa, la combinación que más usa la contratada)
+    @Test
+    void casoPotenciaEscasaEnciendeLaCombinacionQueMasAprovechaLaContratada() {
+        // El sitio de F05 de ecowarm-run: empatadas, la de 1,2 kW sola dejaría 0,8 kW libres donde no entra nadie
+        HabitacionDTO room1 = new HabitacionDTO("room1", 20.3, 19.5, 1.2, EstadoSwitch.OFF);
+        HabitacionDTO room2 = new HabitacionDTO("room2", 21.8, 21.0, 0.9, EstadoSwitch.OFF);
+        HabitacionDTO room3 = new HabitacionDTO("room3", 22.1, 21.3, 0.9, EstadoSwitch.OFF);
+        HabitacionDTO room4 = new HabitacionDTO("room4", 20.4, 19.6, 1.0, EstadoSwitch.OFF);
+
+        Salida resultado = new EvaluadorCore().evaluarEstado(
+                martes10hs, 2.0, tarifaHabiles, List.of(room1, room2, room3, room4));
+
+        // room2 y room4 suman 1,9 kW (room3 con room4, también; entre iguales va primero room2 en el inventario)
+        assertEquals(List.of(new Orden("room2", AccionSwitch.ON), new Orden("room4", AccionSwitch.ON)),
+                resultado.ordenes());
+    }
+
+    @Test
+    void casoEntreCombinacionesQueAprovechanLoMismoEnciendeLasMasLejosDeSuObjetivo() {
+        HabitacionDTO habA = new HabitacionDTO("A", 21.0, 20.0, 1.0, EstadoSwitch.OFF);
+        HabitacionDTO habB = new HabitacionDTO("B", 21.0, 18.0, 1.0, EstadoSwitch.OFF);
+        HabitacionDTO habC = new HabitacionDTO("C", 21.0, 19.0, 1.0, EstadoSwitch.OFF);
+
+        Salida resultado = new EvaluadorCore().evaluarEstado(
+                martes10hs, 2.0, tarifaHabiles, List.of(habA, habB, habC));
+
+        assertEquals(List.of(new Orden("B", AccionSwitch.ON), new Orden("C", AccionSwitch.ON)), resultado.ordenes());
+    }
+
+    @Test
+    void casoLaPotenciaQueQuedaLibreSeCompletaConLaCombinacionQueMejorEntra() {
+        // A ya está encendida y deja 1,5 kW libres: B (1,0) y C (0,5) los llenan; D (1,2) sola no
+        HabitacionDTO habA = new HabitacionDTO("A", 21.0, 18.0, 1.5, EstadoSwitch.ON);
+        HabitacionDTO habB = new HabitacionDTO("B", 21.0, 19.0, 1.0, EstadoSwitch.OFF);
+        HabitacionDTO habC = new HabitacionDTO("C", 21.0, 20.0, 0.5, EstadoSwitch.OFF);
+        HabitacionDTO habD = new HabitacionDTO("D", 21.0, 17.0, 1.2, EstadoSwitch.OFF);
+
+        Salida resultado = new EvaluadorCore().evaluarEstado(
+                martes10hs, 3.0, tarifaHabiles, List.of(habA, habB, habC, habD));
+
+        assertEquals(List.of(new Orden("B", AccionSwitch.ON), new Orden("C", AccionSwitch.ON)), resultado.ordenes());
+    }
+
+    @Test
+    void casoBajaLaContratadaSiguenEncendidasLasQueMasLaAprovechan() {
+        // 3,5 kW encendidos y ahora 2,5 contratados. Apagar A (la más cerca) dejaría 2,0; apagar B deja 2,5
+        HabitacionDTO habA = new HabitacionDTO("A", 21.0, 20.5, 1.5, EstadoSwitch.ON);
+        HabitacionDTO habB = new HabitacionDTO("B", 21.0, 19.0, 1.0, EstadoSwitch.ON);
+        HabitacionDTO habC = new HabitacionDTO("C", 21.0, 18.0, 1.0, EstadoSwitch.ON);
+
+        Salida resultado = new EvaluadorCore().evaluarEstado(
+                martes10hs, 2.5, tarifaHabiles, List.of(habA, habB, habC));
+
+        assertEquals(List.of(new Orden("B", AccionSwitch.OFF)), resultado.ordenes());
+    }
+
+    @Test
+    void casoConMuchasHabitacionesConFrioLasQueNoSeCombinanSeSumanSiEntran() {
+        // MAX_A_COMBINAR + 2 habitaciones de 1 kW con 17,5 kW libres: entran 17, una por una o combinadas
+        List<HabitacionDTO> habitaciones = new ArrayList<>();
+        for (int i = 0; i < EvaluadorCore.MAX_A_COMBINAR + 2; i++) {
+            habitaciones.add(new HabitacionDTO("h" + i, 21.0, 15.0, 1.0, EstadoSwitch.OFF));
+        }
+
+        Salida resultado = new EvaluadorCore().evaluarEstado(martes10hs, 17.5, tarifaHabiles, habitaciones);
+
+        assertEquals(17, resultado.ordenes().size());
+        assertTrue(resultado.ordenes().stream().allMatch(o -> o.accion() == AccionSwitch.ON));
+        assertEquals("h16", resultado.ordenes().get(16).idHabitacion());
     }
 
     @Test
