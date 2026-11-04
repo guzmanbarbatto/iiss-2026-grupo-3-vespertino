@@ -22,6 +22,7 @@ import com.ioteste.engine.domain.Tarifa;
 import com.ioteste.engine.repository.HistoricoRepository;
 import com.ioteste.engine.repository.HistoricoRepository.Lectura;
 import com.ioteste.engine.repository.SitioRepository;
+import com.ioteste.engine.service.SwitchClientService.Resultado;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZonedDateTime;
@@ -68,7 +69,7 @@ class EvaluadorJobServiceTest {
                 new RelojControl(clock), scheduler);
         lenient().doReturn(tarea).when(scheduler).scheduleAtFixedRate(any(Runnable.class), any(Duration.class));
         lenient().when(historicoRepository.ultimasLecturas()).thenReturn(lecturas);
-        lenient().when(switchClient.comandarSwitch(anyString(), anyString())).thenReturn(true);
+        lenient().when(switchClient.comandarSwitch(anyString(), anyString())).thenReturn(Resultado.APLICADO);
     }
 
     // ---------------------------------------------------------------- reglas fuera de punta
@@ -77,7 +78,7 @@ class EvaluadorJobServiceTest {
     void fueraDePuntaApagaLaHabitacionQueSuperoLaTemperatura() {
         iniciarEn(MARTES_10HS);
         sitio(10.0, habitacion("1", 20.0, 2.0));
-        lectura("1", 25.0, MARTES_10HS);
+        lectura("1", 25.0);
         when(switchClient.consultarEstado("sw-1")).thenReturn(EstadoSwitch.ON);
 
         motor.ejecutarCicloDeControl();
@@ -90,7 +91,7 @@ class EvaluadorJobServiceTest {
     void fueraDePuntaEnciendeLaHabitacionConFrioSiHayPotencia() {
         iniciarEn(MARTES_10HS);
         sitio(10.0, habitacion("1", 22.0, 2.0));
-        lectura("1", 15.0, MARTES_10HS);
+        lectura("1", 15.0);
         when(switchClient.consultarEstado("sw-1")).thenReturn(EstadoSwitch.OFF);
 
         motor.ejecutarCicloDeControl();
@@ -102,7 +103,7 @@ class EvaluadorJobServiceTest {
     void sinPotenciaSuficienteNoEnciendeAunqueHagaFrio() {
         iniciarEn(MARTES_10HS);
         sitio(1.0, habitacion("1", 22.0, 2.0));
-        lectura("1", 15.0, MARTES_10HS);
+        lectura("1", 15.0);
         when(switchClient.consultarEstado("sw-1")).thenReturn(EstadoSwitch.OFF);
 
         motor.ejecutarCicloDeControl();
@@ -116,8 +117,8 @@ class EvaluadorJobServiceTest {
     void enTarifaPuntaApagaLoEncendidoYNoEnciendeNada() {
         iniciarEn(LUNES_18HS);
         sitio(10.0, habitacion("1", 22.0, 2.0), habitacion("2", 22.0, 2.0));
-        lectura("1", 15.0, LUNES_18HS);
-        lectura("2", 15.0, LUNES_18HS);
+        lectura("1", 15.0);
+        lectura("2", 15.0);
         when(switchClient.consultarEstado("sw-1")).thenReturn(EstadoSwitch.ON);
         when(switchClient.consultarEstado("sw-2")).thenReturn(EstadoSwitch.OFF);
 
@@ -135,7 +136,7 @@ class EvaluadorJobServiceTest {
         when(switchClient.consultarEstado("sw-1")).thenReturn(EstadoSwitch.ON);
 
         clock.avanzar(Duration.ofSeconds(2)); // 2 s reales x 60 = 16:59 + 2 min = 17:01 lógico
-        lectura("1", 15.0, lunes1659.plusSeconds(120));
+        lectura("1", 15.0);
         motor.ejecutarCicloDeControl();
 
         verify(switchClient).comandarSwitch("sw-1", "OFF");
@@ -147,7 +148,7 @@ class EvaluadorJobServiceTest {
         when(sitioRepository.obtenerInventario()).thenReturn(Optional.of(new InventarioDTO("2.0",
                 new Sitio("s", "Casa", 10.0, new Tarifa(new Franja("17:00", "23:00", "MONDAY,TUESDAY"))),
                 List.of(habitacion("1", 22.0, 2.0)))));
-        lectura("1", 15.0, LUNES_18HS);
+        lectura("1", 15.0);
         when(switchClient.consultarEstado("sw-1")).thenReturn(EstadoSwitch.ON);
 
         motor.ejecutarCicloDeControl();
@@ -158,15 +159,84 @@ class EvaluadorJobServiceTest {
     // ---------------------------------------------------------------- fail-safe de termostatos
 
     @Test
-    void lecturaVencidaFuerzaElApagadoAunqueLaUltimaTemperaturaFueraFria() {
+    void aVelocidadRealUnTermostatoCalladoMasDeDiezMinutosSeDaPorCaido() {
         iniciarEn(MARTES_10HS);
         sitio(10.0, habitacion("1", 22.0, 2.0));
-        lectura("1", 15.0, MARTES_10HS.minus(Duration.ofMinutes(15)));
+        lecturaRecibidaHace("1", 15.0, Duration.ofMinutes(11));
         when(switchClient.consultarEstado("sw-1")).thenReturn(EstadoSwitch.ON);
 
         motor.ejecutarCicloDeControl();
 
         verify(switchClient).comandarSwitch("sw-1", "OFF");
+    }
+
+    @Test
+    void aVelocidadRealUnaLecturaDeHaceNueveMinutosSigueVigente() {
+        iniciarEn(MARTES_10HS);
+        sitio(10.0, habitacion("1", 22.0, 2.0));
+        lecturaRecibidaHace("1", 15.0, Duration.ofMinutes(9));
+        when(switchClient.consultarEstado("sw-1")).thenReturn(EstadoSwitch.OFF);
+
+        motor.ejecutarCicloDeControl();
+
+        verify(switchClient).comandarSwitch("sw-1", "ON");
+    }
+
+    @Test
+    void conAceleracionAltaLasLecturasNoSeVencenAntesDeTiempo() {
+        // x600: 600 s simulados duran 1 s real. El termostato publica cada 5 s, así que antes cada lectura
+        // llegaba "vencida" y el engine apagaba todo. Ahora se espera a que pierda 3 lecturas (15 s).
+        motor.iniciarMotor(MARTES_10HS, 600.0);
+        sitio(10.0, habitacion("1", 22.0, 2.0));
+        lecturaRecibidaHace("1", 15.0, Duration.ofSeconds(10), Duration.ofSeconds(5));
+        when(switchClient.consultarEstado("sw-1")).thenReturn(EstadoSwitch.OFF);
+
+        motor.ejecutarCicloDeControl();
+
+        verify(switchClient).comandarSwitch("sw-1", "ON");
+    }
+
+    @Test
+    void conAceleracionAltaUnTermostatoQuePierdeTresLecturasSeDaPorCaido() {
+        motor.iniciarMotor(MARTES_10HS, 600.0);
+        sitio(10.0, habitacion("1", 22.0, 2.0));
+        lecturaRecibidaHace("1", 15.0, Duration.ofSeconds(16), Duration.ofSeconds(5));
+        when(switchClient.consultarEstado("sw-1")).thenReturn(EstadoSwitch.ON);
+
+        motor.ejecutarCicloDeControl();
+
+        verify(switchClient).comandarSwitch("sw-1", "OFF");
+    }
+
+    @Test
+    void unTermostatoQuePublicaMasLentoNoSeDaPorCaidoAntesDeTiempo() {
+        // Publica cada 30 s reales: con un límite fijo de 15 s, cada lectura vencía antes de la siguiente
+        motor.iniciarMotor(MARTES_10HS, 600.0);
+        sitio(10.0, habitacion("1", 22.0, 2.0));
+        lecturaRecibidaHace("1", 15.0, Duration.ofSeconds(45), Duration.ofSeconds(30));
+        when(switchClient.consultarEstado("sw-1")).thenReturn(EstadoSwitch.OFF);
+
+        motor.ejecutarCicloDeControl();
+
+        verify(switchClient).comandarSwitch("sw-1", "ON");
+    }
+
+    @Test
+    void elLimiteDeSilencioEsDiezMinutosSimuladosOTresLecturasPerdidasLoQueSeaMayor() {
+        Duration cadaCinco = Duration.ofSeconds(5);
+        assertThat(motor.silencioMaximo(cadaCinco)).isEqualTo(Duration.ofMinutes(10)); // detenido: tiempo real
+        motor.iniciarMotor(MARTES_10HS, 10.0);
+        assertThat(motor.silencioMaximo(cadaCinco)).isEqualTo(Duration.ofSeconds(60));
+        motor.iniciarMotor(MARTES_10HS, 60.0);
+        assertThat(motor.silencioMaximo(cadaCinco)).isEqualTo(Duration.ofSeconds(15)); // 10 s < 3 lecturas
+        assertThat(motor.silencioMaximo(Duration.ofSeconds(30))).isEqualTo(Duration.ofSeconds(90));
+    }
+
+    @Test
+    void sinRitmoConocidoSeSuponeUnoProvisorioYHayUnPisoAbsoluto() {
+        motor.iniciarMotor(MARTES_10HS, 600.0);
+        assertThat(motor.silencioMaximo(null)).isEqualTo(Duration.ofSeconds(30)); // una sola lectura: 3 × 10 s
+        assertThat(motor.silencioMaximo(Duration.ofMillis(100))).isEqualTo(Duration.ofSeconds(2));
     }
 
     @Test
@@ -183,16 +253,64 @@ class EvaluadorJobServiceTest {
     }
 
     @Test
-    void unaLecturaConTimestampRealSigueVigenteConElRelojAcelerado() {
-        motor.iniciarMotor(MARTES_10HS, 60.0);
+    void laVigenciaSeMideDesdeQueLlegoLaLecturaYNoPorSuTimestamp() {
+        // El ts puede venir en el reloj virtual del simulador (acá, días atrás): lo que cuenta es la llegada
+        iniciarEn(MARTES_10HS);
         sitio(10.0, habitacion("1", 22.0, 2.0));
+        lecturas.put("hab-1", new Lectura(Instant.parse("2020-01-01T00:00:00Z"), clock.instant(), 15.0));
         when(switchClient.consultarEstado("sw-1")).thenReturn(EstadoSwitch.OFF);
 
-        clock.avanzar(Duration.ofSeconds(5)); // 5 min lógicos
-        lectura("1", 15.0, INSTANTE_REAL.plusSeconds(4));
         motor.ejecutarCicloDeControl();
 
         verify(switchClient).comandarSwitch("sw-1", "ON");
+    }
+
+    // ---------------------------------------------------------------- habitaciones retiradas del inventario
+
+    @Test
+    @ExtendWith(OutputCaptureExtension.class)
+    void elSwitchDeUnaHabitacionRetiradaSeApagaYDejaDeEstarPendiente(CapturedOutput salida) {
+        iniciarEn(MARTES_10HS);
+        when(sitioRepository.switchesPendientesDeApagar()).thenReturn(List.of("sw-9"), List.of());
+        when(sitioRepository.obtenerInventario()).thenReturn(Optional.empty());
+
+        motor.ejecutarCicloDeControl();
+        motor.ejecutarCicloDeControl();
+
+        verify(switchClient, times(1)).comandarSwitch("sw-9", "OFF");
+        verify(sitioRepository).quitarPendienteDeApagar("sw-9");
+        assertThat(salida.getOut()).contains("sw-9 → OFF (su habitación ya no está en el inventario)");
+    }
+
+    @Test
+    void siNoSePudoApagarElSwitchRetiradoSigueAnotadoYSeReintenta() {
+        iniciarEn(MARTES_10HS);
+        when(sitioRepository.switchesPendientesDeApagar()).thenReturn(List.of("sw-9"), List.of("sw-9"), List.of());
+        when(sitioRepository.obtenerInventario()).thenReturn(Optional.empty());
+        when(switchClient.comandarSwitch("sw-9", "OFF")).thenReturn(Resultado.FALLIDO, Resultado.APLICADO);
+
+        motor.ejecutarCicloDeControl();
+        verify(sitioRepository, never()).quitarPendienteDeApagar(anyString());
+        motor.ejecutarCicloDeControl();
+        motor.ejecutarCicloDeControl();
+
+        verify(switchClient, times(2)).comandarSwitch("sw-9", "OFF");
+        verify(sitioRepository, times(1)).quitarPendienteDeApagar("sw-9");
+    }
+
+    @Test
+    @ExtendWith(OutputCaptureExtension.class)
+    void siElSwitchRetiradoNoExisteEnElSimuladorSeDescarta(CapturedOutput salida) {
+        // Pasa con bases de la versión anterior: la semilla tenía switches que el simulador no conoce
+        iniciarEn(MARTES_10HS);
+        when(sitioRepository.switchesPendientesDeApagar()).thenReturn(List.of("sw-room6"));
+        when(sitioRepository.obtenerInventario()).thenReturn(Optional.empty());
+        when(switchClient.comandarSwitch("sw-room6", "OFF")).thenReturn(Resultado.INEXISTENTE);
+
+        motor.ejecutarCicloDeControl();
+
+        verify(sitioRepository).quitarPendienteDeApagar("sw-room6");
+        assertThat(salida.getOut()).contains("sw-room6 salió del inventario y no existe en el simulador");
     }
 
     // ---------------------------------------------------------------- estado real de los switches
@@ -201,7 +319,7 @@ class EvaluadorJobServiceTest {
     void elEstadoDelSwitchSeConsultaEnCadaCicloYSeCorrigeUnCambioExterno() {
         iniciarEn(MARTES_10HS);
         sitio(10.0, habitacion("1", 20.0, 2.0));
-        lectura("1", 25.0, MARTES_10HS);
+        lectura("1", 25.0);
         // Ciclo 1: apagado y caliente, nada que hacer. Entre ciclos alguien (p. ej. el MCP) lo enciende.
         when(switchClient.consultarEstado("sw-1")).thenReturn(EstadoSwitch.OFF, EstadoSwitch.ON);
 
@@ -217,7 +335,7 @@ class EvaluadorJobServiceTest {
     void unSwitchQueNoSePudoConsultarSeComandaYSeReconsultaEnElCicloSiguiente() {
         iniciarEn(MARTES_10HS);
         sitio(10.0, habitacion("1", 22.0, 2.0));
-        lectura("1", 15.0, MARTES_10HS);
+        lectura("1", 15.0);
         when(switchClient.consultarEstado("sw-1")).thenReturn(EstadoSwitch.DESCONOCIDO, EstadoSwitch.OFF);
 
         motor.ejecutarCicloDeControl();
@@ -230,10 +348,10 @@ class EvaluadorJobServiceTest {
     void unSwitchQueFallaAlComandarNoImpideComandarLosDemas() {
         iniciarEn(MARTES_10HS);
         sitio(10.0, habitacion("1", 20.0, 2.0), habitacion("2", 20.0, 2.0));
-        lectura("1", 25.0, MARTES_10HS);
-        lectura("2", 25.0, MARTES_10HS);
+        lectura("1", 25.0);
+        lectura("2", 25.0);
         when(switchClient.consultarEstado(anyString())).thenReturn(EstadoSwitch.ON);
-        when(switchClient.comandarSwitch("sw-1", "OFF")).thenReturn(false);
+        when(switchClient.comandarSwitch("sw-1", "OFF")).thenReturn(Resultado.FALLIDO);
 
         motor.ejecutarCicloDeControl();
 
@@ -259,8 +377,8 @@ class EvaluadorJobServiceTest {
     void cadaCicloConCambiosDejaUnaLineaConHoraSimuladaYPotencia(CapturedOutput salida) {
         iniciarEn(MARTES_10HS);
         sitio(3.0, habitacion("1", 22.0, 2.0), habitacion("2", 20.0, 0.8));
-        lectura("1", 15.0, MARTES_10HS);
-        lectura("2", 25.0, MARTES_10HS);
+        lectura("1", 15.0);
+        lectura("2", 25.0);
         when(switchClient.consultarEstado("sw-1")).thenReturn(EstadoSwitch.OFF);
         when(switchClient.consultarEstado("sw-2")).thenReturn(EstadoSwitch.ON);
 
@@ -279,7 +397,7 @@ class EvaluadorJobServiceTest {
 
         motor.ejecutarCicloDeControl();
         motor.ejecutarCicloDeControl();
-        lectura("1", 21.9, MARTES_10HS);
+        lectura("1", 21.9);
         motor.ejecutarCicloDeControl();
 
         assertThat(salida.getOut().split("Fail-safe: sin lecturas recientes de hab-1", -1)).hasSize(2);
@@ -315,6 +433,24 @@ class EvaluadorJobServiceTest {
         motor.ejecutarCicloDeControl();
 
         verifyNoInteractions(switchClient);
+    }
+
+    @Test
+    @ExtendWith(OutputCaptureExtension.class)
+    void unaFallaQueDuraVariosCiclosSeAvisaAlEmpezarYAlTerminar(CapturedOutput salida) {
+        iniciarEn(MARTES_10HS);
+        when(sitioRepository.obtenerInventario())
+                .thenThrow(new DataAccessResourceFailureException("base caída"))
+                .thenThrow(new DataAccessResourceFailureException("base caída"))
+                .thenThrow(new DataAccessResourceFailureException("base caída"))
+                .thenReturn(Optional.empty());
+
+        for (int i = 0; i < 4; i++) {
+            motor.ejecutarCicloDeControl();
+        }
+
+        assertThat(salida.getOut().split("Error en el ciclo de control", -1)).hasSize(2);
+        assertThat(salida.getOut().split("El ciclo de control vuelve a funcionar", -1)).hasSize(2);
     }
 
     // ---------------------------------------------------------------- iniciar y detener
@@ -395,7 +531,18 @@ class EvaluadorJobServiceTest {
                 "ht-" + n + "/status/temperature:0", "sw-" + n, "http://simulador:9090");
     }
 
-    private void lectura(String n, double temperatura, Instant fechaHora) {
-        lecturas.put("hab-" + n, new Lectura(fechaHora, temperatura));
+    /** Una lectura que acaba de llegar. */
+    private void lectura(String n, double temperatura) {
+        lecturaRecibidaHace(n, temperatura, Duration.ZERO);
+    }
+
+    private void lecturaRecibidaHace(String n, double temperatura, Duration hace) {
+        lecturaRecibidaHace(n, temperatura, hace, null);
+    }
+
+    /** Una lectura de un termostato que publica cada {@code ritmo} ({@code null}: todavía no se conoce). */
+    private void lecturaRecibidaHace(String n, double temperatura, Duration hace, Duration ritmo) {
+        Instant recibida = clock.instant().minus(hace);
+        lecturas.put("hab-" + n, new Lectura(recibida, recibida, temperatura, ritmo));
     }
 }

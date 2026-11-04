@@ -10,9 +10,13 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
 import com.ioteste.core.domain.EstadoSwitch;
+import com.ioteste.engine.service.SwitchClientService.Resultado;
 import java.net.ConnectException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -81,18 +85,38 @@ class SwitchClientServiceTest {
                 .andExpect(content().json("{\"accion\":\"OFF\"}", JsonCompareMode.STRICT))
                 .andRespond(json("{\"idSwitch\":\"sw-1\",\"estado\":\"OFF\",\"cambio\":true,\"aplicadoEn\":\"t\"}"));
 
-        assertThat(cliente.comandarSwitch("sw-1", "OFF")).isTrue();
+        assertThat(cliente.comandarSwitch("sw-1", "OFF")).isEqualTo(Resultado.APLICADO);
         simulador.verify();
     }
 
     @Test
-    void unComandoFallidoDevuelveFalseSinLanzar() {
+    void distingueUnSwitchInexistenteDeUnaFallaSinLanzar() {
         simulador.expect(requestTo("http://sim/switches/sw-9/comandos")).andRespond(withStatus(HttpStatus.NOT_FOUND));
         simulador.expect(requestTo("http://sim/switches/sw-1/comandos"))
                 .andRespond(withException(new ConnectException("caído")));
 
-        assertThat(cliente.comandarSwitch("sw-9", "ON")).isFalse();
-        assertThat(cliente.comandarSwitch("sw-1", "ON")).isFalse();
+        assertThat(cliente.comandarSwitch("sw-9", "ON")).isEqualTo(Resultado.INEXISTENTE);
+        assertThat(cliente.comandarSwitch("sw-1", "ON")).isEqualTo(Resultado.FALLIDO);
+    }
+
+    @Test
+    @ExtendWith(OutputCaptureExtension.class)
+    void unSwitchCaidoSeAvisaUnaVezYOtraCuandoVuelveAResponder(CapturedOutput salida) {
+        for (int i = 0; i < 3; i++) {
+            simulador.expect(requestTo("http://sim/switches/sw-1")).andRespond(withException(new ConnectException("x")));
+        }
+        simulador.expect(requestTo("http://sim/switches/sw-1/comandos"))
+                .andRespond(withException(new ConnectException("x")));
+        simulador.expect(requestTo("http://sim/switches/sw-1")).andRespond(json("{\"estado\":\"OFF\"}"));
+
+        for (int i = 0; i < 3; i++) {
+            cliente.consultarEstado("sw-1");
+        }
+        cliente.comandarSwitch("sw-1", "ON");
+        cliente.consultarEstado("sw-1");
+
+        assertThat(salida.getOut().split("No se pudo", -1)).hasSize(2);
+        assertThat(salida.getOut().split("El switch sw-1 vuelve a responder", -1)).hasSize(2);
     }
 
     private static ResponseCreator json(String cuerpo) {

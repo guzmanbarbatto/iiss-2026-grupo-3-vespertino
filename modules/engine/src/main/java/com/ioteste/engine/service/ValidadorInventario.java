@@ -88,7 +88,12 @@ public class ValidadorInventario {
             }
             positivo(h.potenciaKW(), nombre + ": potenciaKW", errores);
             requerido(h.idTermostato(), nombre + ": idTermostato", errores);
-            requerido(h.topicTermostato(), nombre + ": topicTermostato", errores);
+            if (requerido(h.topicTermostato(), nombre + ": topicTermostato", errores)
+                    && (h.topicTermostato().contains("+") || h.topicTermostato().contains("#"))) {
+                // El controlador se suscribe al topic declarado: un comodín lo suscribiría a otros dispositivos
+                errores.add(nombre + ": topicTermostato no puede tener comodines MQTT (+ o #), es '"
+                        + h.topicTermostato() + "'");
+            }
             requerido(h.idSwitch(), nombre + ": idSwitch", errores);
             if (requerido(h.urlSwitch(), nombre + ": urlSwitch", errores) && !esUriAbsoluta(h.urlSwitch())) {
                 errores.add(nombre + ": urlSwitch no es una URL válida ('" + h.urlSwitch() + "')");

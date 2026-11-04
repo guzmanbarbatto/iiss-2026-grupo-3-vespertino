@@ -131,6 +131,18 @@ class ValidadorInventarioTest {
     }
 
     @Test
+    void elTopicDelTermostatoNoPuedeTenerComodinesMqtt() {
+        Habitacion conMas = new Habitacion("r1", "A", 20.0, 1.0, "ht-1", "+/status/temperature:0", "sw-1", "http://s");
+        Habitacion conNumeral = new Habitacion("r2", "B", 20.0, 1.0, "ht-2", "casa/#", "sw-2", "http://s");
+        Habitacion fueraDeConvencion = new Habitacion("r3", "C", 20.0, 1.0, "ht-3", "casa/estudio/temp", "sw-3",
+                "http://s");
+
+        assertThat(validador.validar(conHabitaciones(conMas, conNumeral, fueraDeConvencion))).containsExactly(
+                "habitación 'r1': topicTermostato no puede tener comodines MQTT (+ o #), es '+/status/temperature:0'",
+                "habitación 'r2': topicTermostato no puede tener comodines MQTT (+ o #), es 'casa/#'");
+    }
+
+    @Test
     void unSitioSinHabitacionesEsValido() {
         assertThat(validador.validar(conHabitaciones())).isEmpty();
     }

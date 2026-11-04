@@ -31,6 +31,13 @@ HABITACIONES = [
     ("room9", "Cuarto niños", 1.0, 20.5, 14.5), ("room10", "Estudio", 0.6, 21.0, 16.5),
 ]
 
+
+def topic(hab):
+    """Topic MQTT del termostato. room10 usa uno fuera de la convención <id>/status/temperature:0,
+    válido para el estándar ("el topic declarado es el que vale")."""
+    return "casa/estudio/temperatura" if hab == "room10" else f"ht-{hab}/status/temperature:0"
+
+
 lock = threading.Lock()
 temperaturas = {h[0]: h[4] for h in HABITACIONES}
 switches = {}
@@ -47,7 +54,7 @@ def inventario():
         "sitio": {"id": "casa-demo", "nombre": "Casa demo (10 habitaciones)", "potenciaContratadaKW": POTENCIA_CONTRATADA,
                   "tarifa": {"punta": {"desde": "17:00", "hasta": "23:00", "dias": "HABILES"}}},
         "habitaciones": [{"id": i, "nombre": n, "temperaturaEsperada": esp, "potenciaKW": kw,
-                          "idTermostato": "ht-" + i, "topicTermostato": f"ht-{i}/status/temperature:0",
+                          "idTermostato": "ht-" + i, "topicTermostato": topic(i),
                           "idSwitch": "sw-" + i, "urlSwitch": "http://simulador:9090"}
                          for i, n, kw, esp, _ in HABITACIONES]}
 
@@ -111,8 +118,8 @@ def termostatos():
                     temperaturas[hab] = max(EXTERIOR, temperaturas[hab] - BAJA_POR_SEGUNDO * transcurrido)
                 tc = round(temperaturas[hab], 1)
                 mensaje = json.dumps({"id": 0, "tC": tc, "tF": round(tc * 9 / 5 + 32, 1), "ts": round(time.time(), 3)})
-                topic = f"ht-{hab}/status/temperature:0".encode()
-                cuerpo = len(topic).to_bytes(2, "big") + topic + mensaje.encode()
+                topic_mqtt = topic(hab).encode()
+                cuerpo = len(topic_mqtt).to_bytes(2, "big") + topic_mqtt + mensaje.encode()
                 try:
                     s.sendall(b"\x30" + largo_variable(len(cuerpo)) + cuerpo)
                 except OSError:

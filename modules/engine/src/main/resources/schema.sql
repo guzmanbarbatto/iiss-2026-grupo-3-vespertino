@@ -26,12 +26,20 @@ CREATE TABLE IF NOT EXISTS habitacion (
 );
 ALTER TABLE habitacion ADD COLUMN IF NOT EXISTS orden INT NOT NULL DEFAULT 0;
 
--- Lecturas MQTT de los termostatos. fecha_hora se guarda en UTC.
+-- Lecturas MQTT de los termostatos, en UTC. fecha_hora es el instante de la medición (ts del termostato);
+-- recibida_en, cuándo llegó al engine (hora real): con eso se detecta un termostato que dejó de publicar.
 CREATE TABLE IF NOT EXISTS historico_temperatura (
     id SERIAL PRIMARY KEY,
     habitacion_id VARCHAR(50) NOT NULL REFERENCES habitacion(id) ON DELETE CASCADE,
     fecha_hora TIMESTAMP NOT NULL,
     temperatura_c NUMERIC(4,1) NOT NULL
+);
+ALTER TABLE historico_temperatura ADD COLUMN IF NOT EXISTS recibida_en TIMESTAMP;
+
+-- Switches de habitaciones que salieron del inventario y todavía hay que apagar. Se anotan en la misma
+-- transacción del PUT /sitio y se borran al apagarlos: un reinicio del engine no los deja encendidos.
+CREATE TABLE IF NOT EXISTS switch_pendiente_apagado (
+    id_switch VARCHAR(50) PRIMARY KEY
 );
 
 -- El ciclo de control y el MCP buscan la última lectura de cada habitación: sin este índice
