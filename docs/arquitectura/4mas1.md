@@ -1,10 +1,22 @@
 # Modelo de Arquitectura 4+1: EcoWarm 
 
-Este documento describe la arquitectura del sistema EcoWarm basándose en el modelo de vistas 4+1, haciendo especial énfasis en la **Vista Lógica** y en la separación estructural implementada en la Iteración 4.
+EcoWarm es el controlador de calefacción del Grupo 3. Cada 30 segundos de tiempo simulado decide qué habitaciones calentar según su temperatura, la potencia contratada y la tarifa punta, y comanda los calefactores a través de los dispositivos del estándar `interop-v2`: termostatos que publican por MQTT y switches que se manejan por HTTP. En el curso, esos dispositivos los provee el simulador de la cátedra.
+
+Este documento describe la arquitectura tal como quedó en la Iteración 6, con el modelo de vistas 4+1:
+
+| Vista | Qué responde |
+|---|---|
+| [1. Lógica](#1-vista-lógica) | Qué componentes hay y qué hace cada uno |
+| [2. Desarrollo](#2-vista-de-desarrollo) | Cómo está organizado el código y cómo se construye y se prueba |
+| [3. Procesos](#3-vista-de-procesos) | Qué corre a la vez y cómo se coordina |
+| [4. Física](#4-vista-física) | Dónde corre cada pieza y cómo se comunican |
+| [5. Escenarios](#5-vista-de-escenarios) | Cómo colaboran las piezas en casos concretos |
+
+El sistema tiene tres módulos Maven: `core` (las reglas de control), `engine` (el controlador) y `mcp` (un servidor MCP para que agentes de IA consulten y operen la casa). Las vistas Lógica, de Procesos y de Escenarios cubren `core` y `engine`; las de Desarrollo y Física, el sistema completo. El servidor MCP tiene su propio 4+1 en [`docs/mcp/4mas1-mcp.md`](../mcp/4mas1-mcp.md), y los contratos de las API están en [`docs/api/`](../api/).
 
 ## 1. Vista Lógica
 
-La arquitectura lógica de EcoWarm se organiza en dos módulos Maven: core y engine. Esta separación permite mantener las reglas de decisión del sistema aisladas de los mecanismos utilizados para obtener información, almacenar datos y ejecutar comandos sobre los dispositivos.
+Esta vista cubre los dos módulos que forman el controlador, `core` y `engine`; el tercero, `mcp`, tiene su propia vista lógica en [`docs/mcp/4mas1-mcp.md`](../mcp/4mas1-mcp.md). Están separados desde la Iteración 4: así las reglas de decisión quedan aisladas de los mecanismos que se usan para obtener información, almacenar datos y ejecutar comandos sobre los dispositivos.
 
 ### A. Módulo `core` 
 El módulo core contiene la lógica de negocio encargada de determinar cuándo deben encenderse o apagarse los switches asociados a las habitaciones.   
