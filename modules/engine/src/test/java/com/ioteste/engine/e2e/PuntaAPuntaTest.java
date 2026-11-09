@@ -1,6 +1,7 @@
 package com.ioteste.engine.e2e;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.within;
 import static org.awaitility.Awaitility.await;
 
 import com.ioteste.engine.domain.Franja;
@@ -19,6 +20,7 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.IntStream;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -76,6 +78,12 @@ class PuntaAPuntaTest {
     private static final Hab ROOM2 = new Hab("room2", "ht-room2/status/temperature:0", "sw-room2", 1.0, "");
     private static final Hab ROOM3 = new Hab("room3", "casa/estudio/temperatura", "sw-room3", 1.0, "/edificio-b");
 
+    /** 20 habitaciones más, de 0.8, 1.1, 1.4 y 1.7 kW, para los escenarios que crecen y achican el sitio. */
+    private static final List<Hab> VEINTE = IntStream.rangeClosed(1, 20)
+            .mapToObj(i -> new Hab(String.format("hab%02d", i), String.format("ht-hab%02d/status/temperature:0", i),
+                    String.format("sw-hab%02d", i), new double[] {0.8, 1.1, 1.4, 1.7}[(i - 1) % 4], ""))
+            .toList();
+
     @Container
     @ServiceConnection
     static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:15-alpine");
@@ -113,6 +121,7 @@ class PuntaAPuntaTest {
     static void levantarSimuladorYTermostatos() throws Exception {
         Map<String, Double> potencias = new HashMap<>();
         List.of(ROOM1, ROOM2, ROOM3).forEach(h -> potencias.put(h.idSwitch(), h.potenciaKW()));
+        VEINTE.forEach(h -> potencias.put(h.idSwitch(), h.potenciaKW()));
         simulador = new SimuladorFalso(CLAVE_SIMULADOR, potencias, MOSQUITTO.getHost(), MOSQUITTO.getMappedPort(1883));
         termostatos = new Termostatos("tcp://" + MOSQUITTO.getHost() + ":" + MOSQUITTO.getMappedPort(1883));
     }
@@ -126,8 +135,15 @@ class PuntaAPuntaTest {
     /** Control detenido, switches apagados, el sitio de 3 habitaciones cargado y todas tibias. */
     @BeforeEach
     void casaEnReposo() {
+        // Un escenario que falló a mitad de una caída no deja al siguiente sin base o sin broker
+        for (GenericContainer<?> contenedor : List.of(POSTGRES, MOSQUITTO)) {
+            if (!contenedor.isRunning()) {
+                levantar(contenedor);
+            }
+        }
         controlar(Map.of("accion", "DETENER"));
         simulador.reiniciar();
+        VEINTE.forEach(h -> termostatos.callar(h.topic())); // las de un escenario anterior dejan de publicar
         cargarSitio(inventario(ROOM1, ROOM2, ROOM3));
         medir(ROOM1, TIBIA);
         medir(ROOM2, TIBIA);
@@ -227,6 +243,81 @@ class PuntaAPuntaTest {
         sigueEn(ROOM1, "OFF", Duration.ofSeconds(2)); // sigue con frío, pero en punta no se enciende
     }
 
+    @Test
+    void alCrecerDe5A20HabitacionesEscuchaLasNuevasYLlenaLaContratadaSinPasarse() {
+        // ecowarm-run E15 (supuesto por el título): un PUT /sitio en caliente suma 15 habitaciones con frío
+        List<Hab> primeras = VEINTE.subList(0, 5);
+        List<Hab> nuevas = VEINTE.subList(5, 20);
+        cargarSitio(inventario(6.0, primeras.toArray(Hab[]::new)));
+        primeras.forEach(h -> medir(h, TIBIA));
+        iniciar(SABADO_9HS, X600);
+
+        publicar(nuevas, FRIA); // nadie las escucha todavía
+        cargarSitio(inventario(6.0, VEINTE.toArray(Hab[]::new)));
+
+        // Se suscribe a los 15 topics nuevos y reparte 6 kW entre 15 habitaciones frías (19.4 kW instalados)
+        await().atMost(Duration.ofSeconds(15)).untilAsserted(() ->
+                assertThat(ultimasTemperaturas()).containsKeys(ids(nuevas)));
+        await().atMost(Duration.ofSeconds(10)).untilAsserted(() ->
+                assertThat(simulador.potenciaEncendida()).isBetween(0.8 * 6.0, 6.0 + 1e-9));
+        assertThat(simulador.potenciaMaxima()).isLessThanOrEqualTo(6.0 + 1e-9);
+        primeras.forEach(h -> assertThat(simulador.estado(h.idSwitch())).as(h.id()).isEqualTo("OFF"));
+    }
+
+    @Test
+    void alAchicarDe20A5HabitacionesNoVuelveATocarLasQueSalieronYSigueConLasDemas() {
+        // ecowarm-run E16 (supuesto por el título): con las 20 calentando, un PUT /sitio en caliente deja 5
+        List<Hab> quedan = VEINTE.subList(0, 5);
+        List<Hab> salen = VEINTE.subList(5, 20);
+        cargarSitio(inventario(12.7, VEINTE.toArray(Hab[]::new)));
+        publicar(VEINTE, FRIA);
+        await().atMost(Duration.ofSeconds(15)).untilAsserted(() ->
+                assertThat(ultimasTemperaturas()).containsKeys(ids(VEINTE)));
+        iniciar(SABADO_9HS, X600);
+        await().atMost(Duration.ofSeconds(10)).untilAsserted(() ->
+                assertThat(simulador.potenciaEncendida()).isBetween(0.8 * 12.7, 12.7 + 1e-9));
+
+        cargarSitio(inventario(12.7, quedan.toArray(Hab[]::new)));
+        await().pollDelay(Duration.ofSeconds(1)).until(() -> true); // un ciclo que ya había empezado termina
+        Map<String, Integer> comandosDeLasQueSalen = new HashMap<>();
+        Map<String, Long> consultasDeLasQueSalen = new HashMap<>();
+        salen.forEach(h -> {
+            comandosDeLasQueSalen.put(h.id(), simulador.comandos(h.idSwitch()).size());
+            consultasDeLasQueSalen.put(h.id(), simulador.consultas(h.idSwitch()));
+        });
+
+        // Las 5 que quedan tienen frío y entran: se encienden todas
+        quedan.forEach(h -> esperarEstado(h, "ON"));
+        // A las que salieron no se las vuelve a consultar ni a comandar (soloSwitchesDelSitio)
+        await().pollDelay(Duration.ofSeconds(3)).until(() -> true);
+        salen.forEach(h -> {
+            assertThat(simulador.comandos(h.idSwitch())).as(h.id()).hasSize(comandosDeLasQueSalen.get(h.id()));
+            assertThat(simulador.consultas(h.idSwitch())).as(h.id()).isEqualTo(consultasDeLasQueSalen.get(h.id()));
+        });
+        assertThat(ultimasTemperaturas()).containsOnlyKeys(ids(quedan));
+    }
+
+    @Test
+    void enUnArranqueEnFrioDejaCadaSwitchEnUnEstadoConocidoSinPasarseDeLaContratada() {
+        // ecowarm-run E17 (supuesto por el título): todas con frío y ningún switch se accionó nunca, así que el
+        // simulador los informa DESCONOCIDO. Las tres juntas (3.5 kW) no entran en 3.0
+        for (Hab h : List.of(ROOM1, ROOM2, ROOM3)) {
+            medir(h, FRIA);
+            simulador.accionarAMano(h.idSwitch(), "DESCONOCIDO");
+        }
+        iniciar(SABADO_9HS, X600);
+
+        // Ninguno queda desconocido: enciende la combinación que más aprovecha (2.5 kW) y apaga explícitamente
+        // la que no entra, en lugar de suponerla apagada
+        await().atMost(UN_PAR_DE_CICLOS).untilAsserted(() -> {
+            for (Hab h : List.of(ROOM1, ROOM2, ROOM3)) {
+                assertThat(simulador.estado(h.idSwitch())).as(h.id()).isIn("ON", "OFF");
+            }
+            assertThat(simulador.potenciaEncendida()).isCloseTo(2.5, within(1e-9));
+        });
+        assertThat(simulador.potenciaMaxima()).isLessThanOrEqualTo(POTENCIA_CONTRATADA);
+    }
+
     // ---------------------------------------------------------------- escenarios de falla
 
     @Test
@@ -298,6 +389,33 @@ class PuntaAPuntaTest {
 
         // Solo vuelve a encenderse con lecturas nuevas: el engine se reconectó y se volvió a suscribir
         esperarEstado(ROOM1, "ON", Duration.ofSeconds(40));
+    }
+
+    @Test
+    void conElBrokerCaidoMediaHoraApagaUnaSolaVezYAlVolverSeReconectaEnSegundos() {
+        // ecowarm-run F02 (supuesto por el título): media hora de broker caído. A ×60, como corre el runner, son
+        // 30 s reales: lo que importa es cuánto tarda en reconectarse después de una caída así de larga
+        medir(ROOM1, FRIA);
+        medir(ROOM2, FRIA);
+        iniciar(SABADO_9HS, 60);
+        esperarEstado(ROOM1, "ON", Duration.ofSeconds(10));
+        esperarEstado(ROOM2, "ON", Duration.ofSeconds(10));
+
+        caer(MOSQUITTO);
+        try {
+            esperarEstado(ROOM1, "OFF", Duration.ofSeconds(20)); // sin lecturas, el fail-safe apaga
+            esperarEstado(ROOM2, "OFF", Duration.ofSeconds(20));
+            await().pollDelay(Duration.ofSeconds(30)).atMost(Duration.ofSeconds(31)).until(() -> true);
+            // En toda la caída se apagó una sola vez cada una y no se encendió nada
+            assertThat(acciones(ROOM1)).containsExactly("ON", "OFF");
+            assertThat(acciones(ROOM2)).containsExactly("ON", "OFF");
+        } finally {
+            levantar(MOSQUITTO); // aunque algo falle, los escenarios siguientes necesitan el broker
+        }
+        Instant volvio = Instant.now();
+        esperarEstado(ROOM1, "ON", Duration.ofSeconds(90));
+        // Volver a controlar no puede esperar a que el cliente MQTT agote su espera entre reintentos
+        assertThat(Duration.between(volvio, Instant.now())).isLessThan(Duration.ofSeconds(15));
     }
 
     @Test
@@ -376,6 +494,91 @@ class PuntaAPuntaTest {
         assertThat(simulador.potenciaMaxima()).isLessThanOrEqualTo(POTENCIA_CONTRATADA);
     }
 
+    @Test
+    void unSwitchQueNoApagaPorErrorSeCuentaEncendidoYNoSeEnciendeOtraEnSuLugar() {
+        // ecowarm-run F06 (supuesto por el título): el OFF responde con un error HTTP y el switch no se apaga
+        medir(ROOM1, FRIA);
+        medir(ROOM2, FRIA);
+        medir(ROOM3, FRIA);
+        iniciar(SABADO_9HS, X600);
+        esperarEstado(ROOM1, "ON");
+        esperarEstado(ROOM2, "ON");
+
+        simulador.fallar(ROOM1.idSwitch(), SimuladorFalso.Falla.OFF_CON_ERROR);
+        medir(ROOM1, 22.0); // llegó: hay que apagarla para encender room3, pero el OFF da error
+        sigueEn(ROOM3, "OFF", Duration.ofSeconds(3));
+        assertThat(simulador.potenciaMaxima()).isLessThanOrEqualTo(POTENCIA_CONTRATADA);
+
+        simulador.sanar(ROOM1.idSwitch());
+        esperarEstado(ROOM1, "OFF");
+        esperarEstado(ROOM3, "ON");
+        assertThat(simulador.potenciaMaxima()).isLessThanOrEqualTo(POTENCIA_CONTRATADA);
+    }
+
+    @Test
+    void conSwitchesFueraDeContratoSigueControlandoSinPasarseNiRepetirOrdenes() {
+        // ecowarm-run F07: room1 informa el estado en minúsculas, room2 contesta texto que no es JSON y room3
+        // tarda más que el timeout, pero obedece. Ninguna consulta se entiende. La contratada alcanza para las tres
+        // (5 kW para 3.5): con la justa, todo lo desconocido cuenta como encendido y no se enciende nada (L16 del
+        // roadmap)
+        cargarSitio(inventario(5.0, ROOM1, ROOM2, ROOM3));
+        simulador.fallar(ROOM1.idSwitch(), SimuladorFalso.Falla.ESTADO_EN_MINUSCULAS);
+        simulador.fallar(ROOM2.idSwitch(), SimuladorFalso.Falla.RESPUESTA_EN_TEXTO);
+        simulador.fallar(ROOM3.idSwitch(), SimuladorFalso.Falla.LENTO);
+        medir(ROOM1, FRIA);
+        medir(ROOM2, FRIA);
+        medir(ROOM3, FRIA);
+        iniciar(SABADO_9HS, X600);
+
+        // Las tres reciben calor, la lenta también: obedece aunque el engine corte por timeout
+        esperarEstado(ROOM1, "ON");
+        esperarEstado(ROOM2, "ON");
+        esperarEstado(ROOM3, "ON", Duration.ofSeconds(10));
+        // Más que los 5 s del estado conocido: después, el engine vuelve a consultar y no entiende la respuesta
+        await().pollDelay(Duration.ofSeconds(7)).atMost(Duration.ofSeconds(8)).until(() -> true);
+        assertThat(simulador.potenciaMaxima()).isLessThanOrEqualTo(5.0);
+        // Aunque su estado no se entienda, a un switch que se encendió no se le repite el ON en cada ciclo
+        assertThat(acciones(ROOM1)).containsExactly("ON");
+        assertThat(acciones(ROOM2)).containsExactly("ON");
+    }
+
+    @Test
+    void unSwitchEncendidoQueNoSeDejaConsultarSeApagaYSeVuelveAEncenderSinSuponerSuEstado() {
+        // ecowarm-run F08 (supuesto por el título): room1 está encendido, pero su consulta responde 503
+        simulador.accionarAMano(ROOM1.idSwitch(), "ON");
+        simulador.fallar(ROOM1.idSwitch(), SimuladorFalso.Falla.CONSULTA_NO_DISPONIBLE);
+        iniciar(SABADO_9HS, X600);
+
+        // Está tibia: como no se sabe si está encendido, se lo apaga explícitamente en vez de suponerlo apagado
+        esperarEstado(ROOM1, "OFF");
+        medir(ROOM1, FRIA);
+        esperarEstado(ROOM1, "ON");
+        assertThat(simulador.potenciaMaxima()).isLessThanOrEqualTo(POTENCIA_CONTRATADA);
+    }
+
+    @Test
+    void unSwitchQueNoPrendeNoDejaSinCalorALasDemasQueEntran() {
+        // ecowarm-run F09 (supuesto por el título): el ON de room1 responde con error y el switch sigue apagado.
+        // Con 3.0 kW, room1 y room2 (2.5) serían lo mejor; si room1 no prende, room2 y room3 (2.0) entran
+        simulador.fallar(ROOM1.idSwitch(), SimuladorFalso.Falla.ON_CON_ERROR);
+        medir(ROOM1, FRIA);
+        medir(ROOM2, FRIA);
+        medir(ROOM3, FRIA);
+        iniciar(SABADO_9HS, X600);
+
+        // room1 sigue apagada, y su potencia no queda reservada: room2 y room3 se encienden
+        esperarEstado(ROOM2, "ON");
+        esperarEstado(ROOM3, "ON", Duration.ofSeconds(10));
+        assertThat(simulador.estado(ROOM1.idSwitch())).isEqualTo("OFF");
+        assertThat(simulador.potenciaMaxima()).isLessThanOrEqualTo(POTENCIA_CONTRATADA);
+
+        // Cuando room1 vuelve a prender, recibe su turno sin pasarse
+        simulador.sanar(ROOM1.idSwitch());
+        medir(ROOM2, TIBIA);
+        esperarEstado(ROOM1, "ON", Duration.ofSeconds(10));
+        assertThat(simulador.potenciaMaxima()).isLessThanOrEqualTo(POTENCIA_CONTRATADA);
+    }
+
     // ---------------------------------------------------------------- ayudas
 
     private static InventarioDTO inventario(Hab... habitaciones) {
@@ -416,6 +619,15 @@ class PuntaAPuntaTest {
         termostatos.medir(hab.topic(), temperaturaC);
         await().atMost(Duration.ofSeconds(30)).untilAsserted(() ->
                 assertThat(ultimasTemperaturas()).containsEntry(hab.id(), temperaturaC));
+    }
+
+    /** Los termostatos pasan a medir esa temperatura, sin esperar a que el engine la guarde (quizás no los escucha). */
+    private static void publicar(List<Hab> habitaciones, double temperaturaC) {
+        habitaciones.forEach(h -> termostatos.medir(h.topic(), temperaturaC));
+    }
+
+    private static String[] ids(List<Hab> habitaciones) {
+        return habitaciones.stream().map(Hab::id).toArray(String[]::new);
     }
 
     private Map<String, Double> ultimasTemperaturas() {

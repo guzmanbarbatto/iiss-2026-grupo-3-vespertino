@@ -30,6 +30,8 @@ Cada decisión indica cuándo se tomó (iteración y PR) y si sigue vigente. Las
 | [D17](#d17-los-switches-se-llaman-en-paralelo-con-timeouts-cortos) | Los switches se llaman en paralelo, con timeouts cortos | Iteración 6 (PR #22 y #23) |
 | [D18](#d18-detener-corta-el-ciclo-en-curso) | `DETENER` corta el ciclo en curso | Iteración 6 (PR #23) |
 | [D19](#d19-cada-falla-se-avisa-al-empezar-y-al-terminar) | Cada falla se avisa al empezar y al terminar | Iteración 6 (PR #21) |
+| [D21](#d21-un-switch-que-rechaza-el-on-sale-del-reparto-unos-ciclos) | Un switch que rechaza el `ON` sale del reparto unos ciclos | Iteración 6 (PR #32) |
+| [D22](#d22-la-reconexión-al-broker-espera-como-mucho-4-s-entre-intentos) | La reconexión al broker espera como mucho 4 s entre intentos | Iteración 6 (PR #32) |
 | | **Calidad** | |
 | [D20](#d20-tests-con-dependencias-reales-y-un-ci-que-no-deja-pasar-tests-omitidos) | Tests con dependencias reales, y un CI que no deja pasar tests omitidos | PR #20 y #22 |
 
@@ -216,6 +218,24 @@ Cada decisión indica cuándo se tomó (iteración y PR) y si sigue vigente. Las
 - **Alternativas descartadas:** bajar esos avisos a `DEBUG`, que esconde cuándo empezó la falla.
 - **Consecuencias:** el log muestra el principio y el fin de cada falla; el detalle de los reintentos queda en `DEBUG`.
 
+### D21. Un switch que rechaza el `ON` sale del reparto unos ciclos
+
+**Iteración 6 (PR #32) · Vigente**
+
+- **Contexto:** en el escenario F09 de la lista del profesor (que el runner no trae y se simuló a partir del título), el switch de una habitación responde con error a cada `ON` y sigue apagado. El core la volvía a elegir en cada ciclo, porque era la de más prioridad y la consulta la mostraba apagada: le guardaba una potencia que nunca usaba, y otra habitación que sí entraba se quedaba sin calor.
+- **Decisión:** si un `ON` falla y el switch sigue apagado, la habitación queda fuera del reparto 4 ciclos (2 minutos simulados) y después se reintenta. Si quedó encendida o con un estado desconocido (el `ON` pudo haber llegado), sigue en el reparto: su potencia cuenta y se la puede apagar. Un `INICIAR` vuelve a poner a todas en el reparto.
+- **Alternativas descartadas:** reintentar en cada ciclo, que es lo que dejaba sin calor a las demás; y dejarla afuera hasta que el switch vuelva a funcionar, algo que solo se sabe mandándole otro `ON`.
+- **Consecuencias:** la potencia va a las habitaciones que pueden usarla. Cuando el switch se arregla, esa habitación puede esperar hasta 4 ciclos. Se avisa una vez cuando un switch deja de confirmar el `ON` y otra cuando lo vuelve a confirmar (D19). Un `ON` que no se confirma por un timeout también cuenta, pero si el switch igual se encendió, la habitación sigue en el reparto.
+
+### D22. La reconexión al broker espera como mucho 4 s entre intentos
+
+**Iteración 6 (PR #32) · Vigente**
+
+- **Contexto:** la reconexión automática de Paho duplica la espera entre intentos, por defecto hasta 128 s. Con el broker caído media hora simulada a ×60 (el F02 de la lista del profesor, simulado a partir del título), el intento siguiente podía llegar hasta 30 s después de que volviera el broker: 30 minutos simulados más con todo apagado por el fail-safe (D13). Con caídas más largas, hasta 2 minutos.
+- **Decisión:** un tope de 4 s entre intentos. Paho duplica la espera mientras sea menor que el tope, así que queda en 1, 2, 4, 4… s.
+- **Alternativas descartadas:** reconectar por cuenta propia, que repite lo que ya hace Paho.
+- **Consecuencias:** el engine vuelve a recibir lecturas a los pocos segundos de que vuelve el broker (1 s en el test de punta a punta). Mientras el broker está caído, intenta conectarse cada 4 s. Paho guarda esa espera en un campo estático, compartido por todos sus clientes en la JVM: el engine tiene uno solo, pero los termostatos falsos del test de punta a punta necesitan el mismo tope, o se la siguen duplicando.
+
 ## Calidad
 
 ### D20. Tests con dependencias reales, y un CI que no deja pasar tests omitidos
@@ -225,7 +245,7 @@ Cada decisión indica cuándo se tomó (iteración y PR) y si sigue vigente. Las
 - **Contexto:** un mock no detecta un error de SQL, de suscripción MQTT o de tiempos entre componentes, y varios de los errores graves del PR #20 eran de ese tipo.
 - **Decisión:** los repositorios se prueban contra PostgreSQL real, y el engine completo contra PostgreSQL y Mosquitto reales, con un simulador y unos termostatos falsos (Testcontainers). El CI corre todo en un runner con Docker y **falla si se omitió algún test**.
 - **Alternativas descartadas:** solo tests con mocks; y una base en memoria (H2), que no tiene el SQL de PostgreSQL.
-- **Consecuencias:** los tests completos necesitan Docker; sin él se omiten en silencio, y por eso existe ese control del CI. El test de punta a punta tarda alrededor de un minuto.
+- **Consecuencias:** los tests completos necesitan Docker; sin él se omiten en silencio, y por eso existe ese control del CI. El test de punta a punta tarda unos 3 minutos.
 
 ---
 

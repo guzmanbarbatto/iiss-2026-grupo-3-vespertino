@@ -52,6 +52,8 @@ public class MqttSubscriberService {
     private static final Logger LOG = LoggerFactory.getLogger(MqttSubscriberService.class);
 
     private static final long REINTENTO_MS = 5_000;
+    /** Tope de la espera entre intentos de reconexión (ver {@link #opciones()}). */
+    private static final int ESPERA_MAXIMA_RECONEXION_MS = 4_000;
     private static final int QOS = 1;
 
     /**
@@ -154,9 +156,18 @@ public class MqttSubscriberService {
         }
     }
 
+    /**
+     * La reconexión automática de Paho duplica la espera entre intentos (1, 2, 4, 8… s), por defecto hasta 128 s: con
+     * el broker caído media hora simulada (×60, 30 s reales), el intento siguiente podía llegar hasta 30 s después de
+     * que el broker volviera, con todo apagado por el fail-safe; con caídas más largas, hasta 2 minutos. Paho la
+     * duplica mientras sea menor que el tope, así que con {@link #ESPERA_MAXIMA_RECONEXION_MS} queda en 1, 2, 4, 4… s.
+     * Ojo: Paho guarda esa espera en un campo estático, compartido por todos los clientes de la JVM; el engine tiene
+     * uno solo, pero otro cliente sin tope en la misma JVM (como el de los tests e2e) la seguiría duplicando.
+     */
     private static MqttConnectOptions opciones() {
         MqttConnectOptions opciones = new MqttConnectOptions();
         opciones.setAutomaticReconnect(true);
+        opciones.setMaxReconnectDelay(ESPERA_MAXIMA_RECONEXION_MS);
         opciones.setCleanSession(true);
         opciones.setConnectionTimeout(10);
         return opciones;
