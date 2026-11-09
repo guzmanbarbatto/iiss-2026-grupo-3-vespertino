@@ -12,7 +12,7 @@ Este documento describe la arquitectura tal como quedó en la Iteración 6, con 
 | [4. Física](#4-vista-física) | Dónde corre cada pieza y cómo se comunican |
 | [5. Escenarios](#5-vista-de-escenarios) | Cómo colaboran las piezas en casos concretos |
 
-El sistema tiene tres módulos Maven: `core` (las reglas de control), `engine` (el controlador) y `mcp` (un servidor MCP para que agentes de IA consulten y operen la casa). Las vistas Lógica, de Procesos y de Escenarios cubren `core` y `engine`; las de Desarrollo y Física, el sistema completo. El servidor MCP tiene su propio 4+1 en [`docs/mcp/4mas1-mcp.md`](../mcp/4mas1-mcp.md), y los contratos de las API están en [`docs/api/`](../api/). Las decisiones que dieron forma a esta arquitectura, con sus motivos y las alternativas descartadas, están en [`decisiones.md`](decisiones.md).
+El sistema tiene tres módulos Maven: `core` (las reglas de control), `engine` (el controlador) y `mcp` (un servidor MCP para que agentes de IA consulten y operen la casa). Las vistas Lógica, de Procesos y de Escenarios cubren `core` y `engine`; las de Desarrollo y Física, el sistema completo. El servidor MCP tiene su propio 4+1 en [`docs/mcp/4mas1-mcp.md`](../mcp/4mas1-mcp.md), y los contratos de las API están en [`docs/api/`](../api/). Las decisiones que dieron forma a esta arquitectura, con sus motivos y las alternativas descartadas, están en [`decisiones.md`](decisiones.md), y sus limitaciones y lo que falta, en [`roadmap.md`](roadmap.md).
 
 ## 1. Vista Lógica
 
