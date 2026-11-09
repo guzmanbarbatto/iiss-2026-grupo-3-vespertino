@@ -3,6 +3,8 @@
 EcoWarm es el controlador de calefacción del **Grupo 3** (IISS 2026, UTEC). Cada 30 segundos de tiempo simulado decide qué habitaciones calentar según su temperatura, la potencia contratada y la tarifa punta, y comanda los calefactores con los dispositivos del estándar `interop-v2`: termostatos que publican por MQTT y switches que se manejan por HTTP. En el curso, esos dispositivos los provee el simulador de la cátedra.
 
 > **Estado al traspaso (Iteración 6, noviembre de 2026).** El controlador pasa los 9 escenarios de `ecowarm-run` sin ninguna expectativa en rojo, y fue el único de los cuatro grupos que pasó los tres escenarios que corrió el profesor el 4/11. Tiene 220 tests y el CI los corre en cada pull request. Lo que falta y las limitaciones conocidas están en [`docs/arquitectura/roadmap.md`](docs/arquitectura/roadmap.md).
+>
+> **Si van a tomar el proyecto, empiecen por la [guía para el equipo receptor](docs/guia-equipo-receptor.md):** qué pedir, un plan para la primera semana, un recorrido por el código y qué cuidar al cambiarlo.
 
 ## Contenido
 
@@ -157,6 +159,7 @@ Los que encontramos durante el desarrollo y las pruebas con la cátedra:
 
 | Documento | Qué tiene | Cuándo leerlo |
 |---|---|---|
+| [`docs/guia-equipo-receptor.md`](docs/guia-equipo-receptor.md) | Qué pedir, plan de la primera semana, recorrido por el código, cómo hacer un cambio, qué cuidar y cómo validar contra la cátedra | Antes que todo, si toman el proyecto |
 | [`docs/arquitectura/4mas1.md`](docs/arquitectura/4mas1.md) | La arquitectura en 5 vistas: lógica, desarrollo, procesos, física y escenarios | Primero |
 | [`docs/arquitectura/decisiones.md`](docs/arquitectura/decisiones.md) | 20 decisiones con su motivo y las alternativas descartadas, y las que se revirtieron | Antes de cambiar un comportamiento |
 | [`docs/arquitectura/roadmap.md`](docs/arquitectura/roadmap.md) | Lo validado, las limitaciones conocidas y las prioridades | Para planificar |
