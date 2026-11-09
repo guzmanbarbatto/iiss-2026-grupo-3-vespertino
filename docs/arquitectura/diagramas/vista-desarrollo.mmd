@@ -1,0 +1,61 @@
+---
+config:
+  layout: elk
+  flowchart:
+    wrappingWidth: 340
+---
+%% Vista de Desarrollo: los módulos Maven, sus paquetes y las dependencias de compilación entre ellos
+%% (sacadas de los import del código). Las bibliotecas externas de cada módulo van en su título.
+%% La flecha punteada es la única relación del MCP con el engine, y es en ejecución: no hay dependencia de código.
+%% Se renderiza a ../VistaDesarrollo.png (ver docs/arquitectura/diagramas/README.md).
+flowchart TB
+    subgraph MCP["<b>modules/mcp</b> → ecowarm-mcp.jar ejecutable, :8081<br/><i>Spring Boot, Spring AI (servidor MCP), Spring JDBC, PostgreSQL</i>"]
+        direction TB
+        M_CONF["<b>config</b><br/>RestClient, tools, seguridad"]
+        M_TOOLS["<b>tools</b><br/>EcoWarmTools: 7 tools"]
+        M_REPO["<b>repository</b><br/>TemperaturaRepository"]
+        M_CLIENT["<b>client</b> y <b>client.dto</b><br/>EngineClient, SimuladorClient"]
+    end
+
+    subgraph ENGINE["<b>modules/engine</b> → engine.jar ejecutable, :8080<br/><i>Spring Boot (Web, JDBC), Eclipse Paho MQTT, PostgreSQL</i>"]
+        direction TB
+        E_CTRL["<b>controller</b><br/>SitioController, ControlController,<br/>ManejadorErrores"]
+        E_SEC["<b>security</b><br/>ApiKeyFilter"]
+        E_SERV["<b>service</b><br/>EvaluadorJobService, MqttSubscriberService,<br/>SwitchClientService, SimuladorRegistroService,<br/>ValidadorInventario, RelojControl, FallasActivas"]
+        E_REPO["<b>repository</b><br/>SitioRepository, HistoricoRepository<br/><i>+ schema.sql</i>"]
+        E_DOM["<b>domain</b><br/>Sitio, Habitacion, InventarioDTO<br/>y los DTO del contrato interop-v2"]
+    end
+
+    subgraph CORE["<b>modules/core</b> → core.jar<br/><i>Java puro: ninguna dependencia</i>"]
+        direction TB
+        C_SERV["<b>service</b><br/>EvaluadorCore"]
+        C_DOM["<b>domain</b><br/>HabitacionDTO, TarifaPunta,<br/>Orden, Salida, EstadoSwitch"]
+    end
+
+    M_CONF --> M_TOOLS
+    M_TOOLS --> M_CLIENT
+    M_TOOLS --> M_REPO
+    M_REPO --> M_CLIENT
+
+    E_CTRL --> E_SERV
+    E_CTRL --> E_REPO
+    E_CTRL --> E_DOM
+    E_SEC --> E_DOM
+    E_SERV --> E_REPO
+    E_SERV --> E_DOM
+    E_REPO --> E_DOM
+
+    E_SERV == "la única dependencia entre módulos:<br/>service usa EvaluadorCore y su dominio" ==> CORE
+    C_SERV --> C_DOM
+
+    M_CLIENT -. "solo en ejecución: HTTP a la API del engine<br/>(no depende de su código)" .-> E_CTRL
+
+    classDef nucleo fill:#f3ecfd,stroke:#7b4bb8,color:#2a1145
+    classDef engine fill:#e8f4fd,stroke:#2b7bb9,color:#0b2a40
+    classDef mcp fill:#e9f7ef,stroke:#2e8b57,color:#0f3320
+    class C_SERV,C_DOM nucleo
+    class E_CTRL,E_SEC,E_SERV,E_REPO,E_DOM engine
+    class M_CONF,M_TOOLS,M_CLIENT,M_REPO mcp
+    style CORE fill:#fbf8fe,stroke:#7b4bb8,color:#2a1145
+    style ENGINE fill:#f5fafe,stroke:#2b7bb9,color:#0b2a40
+    style MCP fill:#f5fbf7,stroke:#2e8b57,color:#0f3320

@@ -36,6 +36,95 @@ El controlador también utiliza un programador de tareas para ejecutar evaluacio
 
 ![Vista Lógica](DiagramaVistaLógica.png)
 
+## 2. Vista de Desarrollo
+
+Cómo está organizado el código para quien lo mantiene: un proyecto Maven con tres módulos (el reactor `ioteste-domotica`), compilado con Java 25 y Spring Boot 3.5. Las flechas del diagrama son dependencias de compilación, sacadas de los `import` del código.
+
+![Módulos, paquetes y dependencias](VistaDesarrollo.png)
+
+### Módulos y reglas de dependencia
+
+| Módulo | Qué contiene | Depende de | Se entrega como |
+|---|---|---|---|
+| `core` | Las reglas de control (`EvaluadorCore`) y los datos que usan | Nada: Java puro, sin Spring, sin base y sin red | `core.jar`, una biblioteca que usa el engine |
+| `engine` | El controlador: API REST (§1 y §5), registro (§6), lecturas por MQTT (§2), switches (§3 y §4), ciclo de control y persistencia | `core`, Spring Boot (Web y JDBC), Eclipse Paho, driver de PostgreSQL | `engine.jar` ejecutable, en la imagen `ecowarm-engine` (puerto 8080) |
+| `mcp` | El servidor MCP para agentes de IA: 7 tools sobre el sitio, las temperaturas y los switches | Spring Boot, Spring AI (servidor MCP), Spring JDBC, driver de PostgreSQL | `ecowarm-mcp.jar` ejecutable, en la imagen `ecowarm-mcp` (puerto 8081). Su detalle está en [`docs/mcp/4mas1-mcp.md`](../mcp/4mas1-mcp.md) |
+
+Las dependencias van en un solo sentido, sin ciclos:
+
+* **`core` no depende de nada.** Las reglas se compilan y se prueban sin Spring, sin base y sin broker: `EvaluadorCoreTest` corre en menos de un segundo. Por eso el umbral de cobertura se exige en este módulo.
+* **`engine` depende de `core`, nunca al revés.** Solo `engine.service` lo usa: arma las `HabitacionDTO`, llama a `EvaluadorCore` y ejecuta las órdenes.
+* **Dentro del engine, nadie depende de `controller`.** `controller` usa `service`, `repository` y `domain`; `service` usa `repository` y `domain`; `repository` y `security` usan solo `domain`.
+* **`mcp` no comparte código con los otros dos.** Habla con el engine por su API REST (el mismo contrato que el simulador) y lee la base de datos. Se compila, se prueba y se despliega por separado.
+
+### Paquetes
+
+| Paquete | Qué hace | Clases principales |
+|---|---|---|
+| `core.domain` | Entrada y salida de las reglas | `HabitacionDTO`, `TarifaPunta`, `EstadoSwitch`, `AccionSwitch`, `Orden`, `Salida` |
+| `core.service` | Las reglas de control | `EvaluadorCore` |
+| `engine` | Arranque de la aplicación y del programador de tareas | `EngineApplication` |
+| `engine.controller` | La API REST de `controlador.openapi-v2.yaml` y el cuerpo de error uniforme | `SitioController`, `ControlController`, `ManejadorErrores` |
+| `engine.security` | Exige la `X-API-Key` en la API | `ApiKeyFilter` |
+| `engine.service` | El ciclo de control y todo lo que habla con el exterior | `EvaluadorJobService`, `RelojControl`, `MqttSubscriberService`, `SwitchClientService`, `SimuladorRegistroService`, `ValidadorInventario`, `FallasActivas` |
+| `engine.repository` | SQL con `JdbcTemplate` y el esquema, que se aplica en cada arranque | `SitioRepository`, `HistoricoRepository`, `schema.sql` |
+| `engine.domain` | Los DTO del contrato `interop-v2` y los eventos internos | `Sitio`, `Habitacion`, `InventarioDTO`, `InventarioReemplazado`, `MensajeTermostato` |
+
+### Estructura del repositorio
+
+```text
+ioteste-domotica/
+├── pom.xml                 # reactor: módulos, versiones, compilación con Java 25, Checkstyle y JaCoCo
+├── google_checks.xml       # reglas de estilo (líneas de hasta 120 columnas)
+├── modules/
+│   ├── core/               # reglas de control, Java puro
+│   ├── engine/             # el controlador (Spring Boot), con su Dockerfile
+│   └── mcp/                # el servidor MCP (Spring Boot + Spring AI), con su Dockerfile
+├── docker/                 # docker-compose.yml y .env (con claves: no se versiona)
+├── scripts/                # construir, levantar, detener y demos
+├── demo/                   # simulador de 10 habitaciones para la demo
+├── docs/                   # contratos OpenAPI, arquitectura, calidad, producto y tests
+└── .github/workflows/      # integración continua
+```
+
+### Build y calidad
+
+* `mvn clean verify` desde la raíz compila los tres módulos en orden (`core` antes que `engine`), corre todos los tests y los controles de calidad. Se compila con `-parameters`, que Spring AI necesita para leer los nombres de los parámetros de las tools.
+* **Checkstyle** (`google_checks.xml`, líneas de hasta 120 columnas) corre en la fase `validate`, sobre el código y también sobre los tests: una sola violación corta el build. Las convenciones del equipo están en [`docs/calidad/estandares_de_codificacion.md`](../calidad/estandares_de_codificacion.md).
+* **JaCoCo** en `core`: si queda cubierto menos del 85 % de las instrucciones, el build falla en la fase `test`.
+
+### Tests
+
+Son 220 (37 en `core`, 151 en `engine` y 32 en `mcp`), organizados por nivel. El detalle de cada uno está en [`docs/tests/criterio-tests.md`](../tests/criterio-tests.md).
+
+| Nivel | Dónde | Qué prueba | Necesita |
+|---|---|---|---|
+| Reglas | `core`: `EvaluadorCoreTest` | Cada regla y sus casos borde | Nada |
+| Servicios | `engine.service` (con Mockito) | El ciclo de control, los switches, MQTT, el registro y la validación del inventario | Nada |
+| API | `engine.controller`: `ApiRestTest` (`@WebMvcTest`) | La API REST contra el contrato | Nada |
+| Repositorios | `engine.repository` y `mcp.repository` | El SQL contra un PostgreSQL real | Docker (Testcontainers) |
+| Punta a punta | `engine.e2e`: `PuntaAPuntaTest` | El engine completo con PostgreSQL y Mosquitto reales, un simulador y termostatos falsos: 14 escenarios normales y de falla | Docker (Testcontainers) |
+| MCP | `mcp` | Las tools, los clientes HTTP y el servidor | Docker para su repositorio |
+
+Sin Docker, los tests con Testcontainers se omiten en silencio. Por eso el CI falla si se omite alguno.
+
+### Integración continua y empaquetado
+
+* **CI** ([`.github/workflows/maven.yml`](../../.github/workflows/maven.yml)), en cada pull request y en cada push a `main`:
+  * `tests`: `mvn verify` en el runner de GitHub, que tiene Docker. Falla si se omitió algún test, y si algo falla guarda los reportes de Surefire.
+  * `build-and-verify`: construye las imágenes Docker con `scripts/build.sh`.
+* **Imágenes:** cada módulo Spring Boot tiene un `Dockerfile` de dos etapas. Compila con `maven:3.9-eclipse-temurin-25` (`mvn clean package -pl modules/<módulo> -am`) y corre sobre `eclipse-temurin:25-jre-alpine`. Dentro de `docker build` no hay Docker, así que ahí se omiten los tests con Testcontainers; los corre el job `tests`.
+* **Configuración:** por variables de entorno en `docker/.env` (la lista está en el README). No se versiona porque tiene claves.
+
+| Script | Qué hace |
+|---|---|
+| `scripts/build.sh` | Construye las imágenes (`docker compose build`) |
+| `scripts/up.sh` | Construye y levanta PostgreSQL, engine y MCP |
+| `scripts/stop.sh` | Detiene los contenedores sin borrarlos |
+| `scripts/down.sh` | Borra contenedores, redes y volúmenes (la base incluida) |
+| `scripts/tiempo-acelerado.sh` | Arranca el control en una fecha y con un factor de aceleración |
+| `scripts/demo-10-habitaciones.sh` | Demo con el simulador de `demo/` (10 habitaciones), con contenedores, puertos y base propios |
+
 ## 3. Vista de Procesos
 
 El engine es un único proceso (una JVM) con cuatro flujos que corren en paralelo. No se llaman entre sí: se coordinan a través de PostgreSQL, del reloj simulado (`RelojControl`) y de dos eventos de Spring.
