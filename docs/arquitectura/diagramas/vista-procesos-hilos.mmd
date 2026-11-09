@@ -34,7 +34,7 @@ flowchart LR
     REG -. "evento: broker anunciado" .-> SUB
     CICLO -- "lee la hora simulada" --> RELOJ
     CICLO -- "lee sitio, lecturas<br/>y ritmo" --> DB
-    CICLO -- "GET y POST {urlSwitch}/switches/{id},<br/>todos a la vez, timeout 1 s" --> SIMS
+    CICLO -- "GET y POST {urlSwitch}/switches/{id},<br/>todos a la vez; espera 3 s<br/>para conectar y 1 s la respuesta" --> SIMS
     SUB -- "lectura y hora de llegada" --> DB
 
     classDef hilo fill:#e8f4fd,stroke:#2b7bb9,color:#0b2a40

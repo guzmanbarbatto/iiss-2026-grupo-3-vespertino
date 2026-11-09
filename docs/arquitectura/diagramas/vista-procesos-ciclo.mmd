@@ -30,14 +30,14 @@ sequenceDiagram
     JOB->>DB: ultimasLecturas()
     DB-->>JOB: la última lectura que llegó y el ritmo de publicación de cada termostato
     Note over JOB: lectura vigente si llegó hace ≤ máx(600 s simulados, 3 lecturas perdidas, 2 s).<br/>Si no, usa 99 °C (fail-safe): la habitación se apaga
-    loop cada habitación, todas a la vez (un switch que no contesta demora como mucho 1 s, no suma)
+    loop cada habitación, todas a la vez (un switch que no contesta demora como mucho un timeout, no suma)
         JOB->>SW: consultarEstado(urlSwitch, id)
         alt el último estado conocido tiene menos de 5 s
             SW-->>JOB: estado conocido, sin consultar
         else venció o no se conoce
             SW->>SIM: GET {urlSwitch}/switches/{id}
             SIM-->>SW: ON / OFF
-            SW-->>JOB: estado real (si falla o pasa 1 s: DESCONOCIDO, que no se recuerda)
+            SW-->>JOB: estado real. Si falla o no se entiende: DESCONOCIDO<br/>(o ON, si era lo último que se sabía)
         end
     end
 
@@ -45,6 +45,7 @@ sequenceDiagram
     Note over CORE: tarifa punta (también si empieza antes de 2 ciclos), histéresis,<br/>y con potencia escasa la combinación que más aprovecha la contratada<br/>(entre iguales, las habitaciones más lejos de su objetivo)
     CORE-->>JOB: Salida: órdenes, las OFF antes que las ON
 
+    Note over JOB: si llegó un DETENER durante el ciclo, no sale ninguna orden más (§5.2)
     loop cada OFF, todos a la vez
         JOB->>SW: comandarSwitch(urlSwitch, id, OFF)
         SW->>SIM: POST {urlSwitch}/switches/{id}/comandos

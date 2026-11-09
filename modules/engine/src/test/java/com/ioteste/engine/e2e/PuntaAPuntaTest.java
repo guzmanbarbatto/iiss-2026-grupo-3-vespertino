@@ -250,6 +250,27 @@ class PuntaAPuntaTest {
     }
 
     @Test
+    void unTermostatoFueraDeContratoApagaSuHabitacionComoSiEstuvieraCallado() {
+        medir(ROOM1, FRIA);
+        medir(ROOM2, FRIA);
+        iniciar(SABADO_9HS, X600);
+        esperarEstado(ROOM1, "ON");
+        esperarEstado(ROOM2, "ON");
+
+        // ecowarm-run F04: -40 °C es el valor de error de un sensor, y "15.0" es un texto, no un número. Ninguno es
+        // una lectura: antes la habitación seguía calentando, como si tuviera muchísimo frío
+        termostatos.medir(ROOM1.topic(), -40.0); // sin esperar a que se guarde: no se tiene que guardar
+        termostatos.publicarTalCual(ROOM2.topic(), "{\"id\":0,\"tC\":\"15.0\",\"tF\":59.0}");
+        esperarEstado(ROOM1, "OFF", Duration.ofSeconds(8));
+        esperarEstado(ROOM2, "OFF", Duration.ofSeconds(8));
+
+        medir(ROOM1, FRIA); // vuelven a mandar lecturas válidas
+        medir(ROOM2, FRIA);
+        esperarEstado(ROOM1, "ON");
+        esperarEstado(ROOM2, "ON");
+    }
+
+    @Test
     void conElSimuladorCaidoElControlSigueYAlVolverCorrigeLosSwitches() {
         medir(ROOM1, FRIA);
         iniciar(SABADO_9HS, X600);

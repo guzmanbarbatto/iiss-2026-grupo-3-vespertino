@@ -37,6 +37,8 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.dao.DataAccessResourceFailureException;
 
 @ExtendWith(MockitoExtension.class)
@@ -154,6 +156,46 @@ class MqttSubscriberServiceTest {
         procesar(TOPIC, "esto no es JSON");
 
         verify(historico, never()).registrar(anyString(), any(), any(), anyDouble());
+    }
+
+    @Test
+    void descartaLosMensajesFueraDeContratoDelEscenarioF04() {
+        // Las fallas de termostato del simulador de la cátedra (ecowarm-run): ninguna es una lectura
+        procesar(TOPIC, "ERROR");                                // texto: no es JSON
+        procesar(TOPIC, "{\"id\":0,\"tF\":70.7,\"ts\":1.0}");    // sinTC
+        procesar(TOPIC, "{\"id\":0,\"tC\":\"20.0\",\"ts\":1.0}"); // tcTexto: Jackson lo convertía a 20.0
+        procesar(TOPIC, "{\"id\":0,\"tC\":-40.0,\"ts\":1.0}");   // fueraDeRango: el valor de error de un sensor
+        procesar(TOPIC, "{\"id\":0,\"tC\":85.0}");               // otro valor de error típico
+        procesar(TOPIC, "{\"id\":0,\"tC\":null}");
+        procesar(TOPIC, "[21.5]");                               // JSON, pero no un objeto
+        procesar(TOPIC, "");
+
+        verify(historico, never()).registrar(anyString(), any(), any(), anyDouble());
+    }
+
+    @Test
+    void losBordesDelRangoPlausibleSonLecturasValidas() {
+        procesar(TOPIC, "{\"tC\":" + MqttSubscriberService.TEMPERATURA_MINIMA_C + "}");
+        procesar(TOPIC, "{\"tC\":" + MqttSubscriberService.TEMPERATURA_MAXIMA_C + "}");
+
+        verify(historico).registrar(TOPIC, AHORA, AHORA, -10.0);
+        verify(historico).registrar(TOPIC, AHORA, AHORA, 50.0);
+    }
+
+    @Test
+    @ExtendWith(OutputCaptureExtension.class)
+    void unTermostatoQueMandaFueraDeContratoSeAvisaUnaVezYOtraAlRecuperarse(CapturedOutput salida) {
+        for (int i = 0; i < 5; i++) {
+            procesar(TOPIC, "{\"id\":0,\"tC\":-40.0}");
+        }
+        procesar(TOPIC, "{\"id\":0,\"tC\":20.1}");
+        procesar(TOPIC, "{\"id\":0,\"tC\":20.2}");
+
+        assertThat(salida.getOut().split("manda mensajes fuera del contrato", -1)).hasSize(2);
+        assertThat(salida.getOut())
+                .contains("ht-room1 manda mensajes fuera del contrato (tC fuera de rango: -40.0 °C)");
+        assertThat(salida.getOut().split("ht-room1 vuelve a mandar lecturas válidas", -1)).hasSize(2);
+        verify(historico).registrar(TOPIC, AHORA, AHORA, 20.1);
     }
 
     @Test

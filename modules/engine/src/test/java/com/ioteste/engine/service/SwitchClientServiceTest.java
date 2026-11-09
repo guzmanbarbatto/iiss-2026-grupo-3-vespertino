@@ -140,8 +140,10 @@ class SwitchClientServiceTest {
             assertThat(real.comandarSwitch(url, "sw-1", "OFF")).isEqualTo(Resultado.FALLIDO);
 
             Duration espera = Duration.ofNanos(System.nanoTime() - inicio);
-            assertThat(SwitchClientService.TIMEOUT_MS).isEqualTo(1000);
+            assertThat(SwitchClientService.READ_TIMEOUT_MS).isEqualTo(1000);
             assertThat(espera).isBetween(Duration.ofMillis(1900), Duration.ofMillis(3500));
+            // Para conectar se espera más: en Wi-Fi, un paquete de conexión perdido se reintenta recién al segundo
+            assertThat(SwitchClientService.CONNECT_TIMEOUT_MS).isEqualTo(3000);
         } finally {
             colgado.stop(0);
             hilos.shutdownNow();
@@ -217,6 +219,51 @@ class SwitchClientServiceTest {
         cliente.comandarSwitch(SIM, "sw-1", "OFF");
 
         assertThat(cliente.consultarEstado(SIM, "sw-1")).isEqualTo(EstadoSwitch.OFF);
+        simulador.verify();
+    }
+
+    @Test
+    void siLaConsultaFallaUnSwitchQueEstabaEncendidoSigueContandoComoEncendido() {
+        simulador.expect(requestTo("http://sim/switches/sw-1")).andRespond(json("{\"estado\":\"ON\"}"));
+        simulador.expect(requestTo("http://sim/switches/sw-1")).andRespond(withException(new ConnectException("x")));
+        simulador.expect(requestTo("http://sim/switches/sw-1")).andRespond(json("{\"estado\":\"on\"}"));
+        simulador.expect(requestTo("http://sim/switches/sw-1")).andRespond(json("{\"estado\":\"OFF\"}"));
+
+        assertThat(cliente.consultarEstado(SIM, "sw-1")).isEqualTo(EstadoSwitch.ON);
+        reloj.avanzar(SwitchClientService.ESTADO_VIGENTE);
+        // Un Connect timed out no apaga la calefacción: no se la deja como desconocida para que no se rote
+        assertThat(cliente.consultarEstado(SIM, "sw-1")).isEqualTo(EstadoSwitch.ON);
+        // Ni una respuesta que no se entiende (F07: el estado en minúsculas); y se sigue consultando en cada ciclo
+        assertThat(cliente.consultarEstado(SIM, "sw-1")).isEqualTo(EstadoSwitch.ON);
+        assertThat(cliente.consultarEstado(SIM, "sw-1")).isEqualTo(EstadoSwitch.OFF);
+        simulador.verify();
+    }
+
+    @Test
+    void siLaConsultaFallaUnSwitchQueEstabaApagadoEsDesconocido() {
+        simulador.expect(requestTo("http://sim/switches/sw-1")).andRespond(json("{\"estado\":\"OFF\"}"));
+        simulador.expect(requestTo("http://sim/switches/sw-1")).andRespond(withException(new ConnectException("x")));
+
+        cliente.consultarEstado(SIM, "sw-1");
+        reloj.avanzar(SwitchClientService.ESTADO_VIGENTE);
+
+        // Podría haberse encendido: no se supone apagado
+        assertThat(cliente.consultarEstado(SIM, "sw-1")).isEqualTo(EstadoSwitch.DESCONOCIDO);
+        simulador.verify();
+    }
+
+    @Test
+    void unApagadoQueNoSeConfirmaNoDejaElEncendidoComoConocido() {
+        simulador.expect(requestTo("http://sim/switches/sw-1")).andRespond(json("{\"estado\":\"ON\"}"));
+        simulador.expect(requestTo("http://sim/switches/sw-1/comandos"))
+                .andRespond(withException(new ConnectException("x")));
+        simulador.expect(requestTo("http://sim/switches/sw-1")).andRespond(withException(new ConnectException("x")));
+
+        cliente.consultarEstado(SIM, "sw-1");
+        cliente.comandarSwitch(SIM, "sw-1", "OFF");
+
+        // F05: no se sabe si el OFF llegó. Desconocido (la potencia sigue contando), no "encendido conocido"
+        assertThat(cliente.consultarEstado(SIM, "sw-1")).isEqualTo(EstadoSwitch.DESCONOCIDO);
         simulador.verify();
     }
 

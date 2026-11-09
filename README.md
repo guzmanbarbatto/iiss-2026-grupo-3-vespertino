@@ -80,11 +80,15 @@ El sistema implementa un patrón **Fail-Safe** riguroso:
 
 * **Aprovecha la potencia contratada.** Con potencia escasa no enciende las habitaciones una por una, sino la combinación que más potencia usa: con 2 kW y habitaciones de 1,2, 0,9, 0,9 y 1,0 kW, enciende 1,9 kW (0,9 + 1,0) en lugar de quedarse con la de 1,2 sola. Entre combinaciones que usan lo mismo, elige la que incluye a las habitaciones más lejos de su objetivo.
 
-* **Un switch que no contesta no frena el control.** Los switches se consultan y se comandan todos a la vez (primero los `OFF`, después los `ON`), y cada llamada espera como mucho 1 s: un ciclo con switches colgados se demora un par de segundos, no uno por switch.
+* **Un switch que no contesta no frena el control.** Los switches se consultan y se comandan todos a la vez (primero los `OFF`, después los `ON`), y cada llamada espera como mucho 3 s para conectar y 1 s para la respuesta: un ciclo con switches colgados se demora un par de segundos, no uno por switch. Si una consulta falla y el switch estaba encendido, se lo sigue contando encendido: un error de red no le corta la calefacción a una habitación.
+
+* **Detenido es detenido:** un `DETENER` que llega en medio de un ciclo corta las órdenes que faltaban; con el control detenido no se comanda ningún switch.
 
 * **En tarifa punta no queda nada encendido**, ni siquiera unos segundos: si la punta empieza antes de los próximos dos ciclos, el engine apaga ya, en lugar de esperar al primer ciclo dentro de la franja.
 
 * Solo se comandan los **switches del sitio vigente**: si una habitación sale del inventario, su switch no se vuelve a consultar ni a comandar.
+
+* **Un termostato fuera de contrato no se toma como lectura:** un mensaje que no es JSON, que no trae `tC`, que la trae como texto o con un valor imposible para una habitación (fuera de −10 a 50 °C, como el −40 °C de un sensor en falla) se descarta, y si el termostato no vuelve a mandar bien, su habitación se apaga por seguridad. Antes, un −40 °C se leía como "mucho frío" y la habitación seguía calentando.
 
 * La última lectura de cada termostato es la que **llegó última**, no la de hora simulada mayor: cada `INICIAR` puede volver el reloj simulado atrás, y las lecturas de una corrida anterior no tapan a las nuevas.
 
@@ -105,7 +109,7 @@ El proyecto incluye un servidor **Model Context Protocol (MCP)** sobre HTTP + SS
 
 ## 🧪 Calidad y Testing
 
-* **Tests Unitarios y de Integración:** El proyecto cuenta con **211 tests automatizados** (`mvn verify`): 37 en `core` (`EvaluadorCoreTest`), 142 en `engine` (ciclo de control, comportamiento ante fallas, API REST contra el contrato, validación del inventario, MQTT, registro, repositorios contra PostgreSQL real y un test de punta a punta con 13 escenarios normales y de falla) y 32 en `mcp`. Los tests de repositorios y el de punta a punta (PostgreSQL y Mosquitto reales) usan Testcontainers: necesitan Docker y, sin él (por ejemplo dentro de `docker build`), se omiten. El detalle está en [`/docs/tests/criterio-tests.md`](docs/tests/criterio-tests.md).
+* **Tests Unitarios y de Integración:** El proyecto cuenta con **220 tests automatizados** (`mvn verify`): 37 en `core` (`EvaluadorCoreTest`), 151 en `engine` (ciclo de control, comportamiento ante fallas, API REST contra el contrato, validación del inventario, MQTT, registro, repositorios contra PostgreSQL real y un test de punta a punta con 14 escenarios normales y de falla) y 32 en `mcp`. Los tests de repositorios y el de punta a punta (PostgreSQL y Mosquitto reales) usan Testcontainers: necesitan Docker y, sin él (por ejemplo dentro de `docker build`), se omiten. El detalle está en [`/docs/tests/criterio-tests.md`](docs/tests/criterio-tests.md).
 
 * **Escenarios de la cátedra (`ecowarm-run`):** el JAR `ecowarm-run.jar` del curso trae el simulador, el broker y 9 escenarios firmados, y deja un reporte. Con el stack levantado (`bash scripts/up.sh`), desde la carpeta donde esté el JAR:
 
