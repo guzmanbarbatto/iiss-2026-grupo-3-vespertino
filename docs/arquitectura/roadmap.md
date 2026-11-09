@@ -8,7 +8,7 @@ Ninguna impide pasar los escenarios del curso. Importan para usarlo en una casa 
 
 | Validado | Cómo |
 |---|---|
-| Las reglas, el ciclo de control, la API y la persistencia | 232 tests (37 en `core`, 163 en `engine` y 32 en `mcp`), con PostgreSQL y Mosquitto reales y 22 escenarios de punta a punta |
+| Las reglas, el ciclo de control, la API y la persistencia | 234 tests (37 en `core`, 165 en `engine` y 32 en `mcp`), con PostgreSQL y Mosquitto reales y 22 escenarios de punta a punta |
 | Los escenarios de la cátedra que tenemos | `ecowarm-run`: 9 de 9 (E02, E04, E11, E14, E18, E19, F01, F03 y F05) y 62 de 62 expectativas |
 | Los escenarios que corrió el profesor el 4/11 | Pasamos los tres; fuimos el único de los cuatro grupos. La única ✗, de nivel *mejora* en F04, se arregló en el PR #23 |
 | El build | El CI corre `mvn verify` en cada PR y falla si se omite algún test |
@@ -55,6 +55,7 @@ Son contrapartidas de decisiones que se tomaron a propósito.
 | L15 | Una orden que ya salió antes de un `DETENER` no se puede retirar | Puede llegar al switch después del `DETENER` | [D18](decisiones.md#d18-detener-corta-el-ciclo-en-curso) |
 | L16 | Un switch que no deja leer su estado cuenta como encendido hasta que se le confirma un comando, y uno que además no confirma los `OFF` (por ejemplo, uno lento) cuenta así siempre | Con la contratada justa, puede no encenderse ninguna habitación mientras dure la falla: pasó en el F07 simulado, con 3,0 kW para 3,5. Con una contratada que alcanza para todas, el control sigue normalmente. Nunca se pasa de la contratada | [D16](decisiones.md#d16-lo-que-no-se-pudo-apagar-cuenta-como-encendido) |
 | L17 | Una habitación cuyo switch rechazó el `ON` vuelve al reparto recién a los 4 ciclos | Cuando el switch se arregla, puede esperar hasta 2 minutos simulados para encenderse | [D21](decisiones.md#d21-un-switch-que-rechaza-el-on-sale-del-reparto-unos-ciclos) |
+| L18 | Si el simulador se reinicia entre dos verificaciones del registro (menos de un minuto) y no ofrece el listado de controladores, el engine no lo nota | El simulador nuevo no lo conoce hasta reiniciar el engine (`bash scripts/up.sh`) | [D23](decisiones.md#d23-ante-un-simulador-que-vuelve-el-controlador-se-registra-de-nuevo) |
 
 ## 3. Roadmap
 

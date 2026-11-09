@@ -9,11 +9,14 @@ import static org.springframework.test.web.client.match.MockRestRequestMatchers.
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.header;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
+import static org.springframework.test.web.client.response.MockRestResponseCreators.withException;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withStatus;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
 import com.ioteste.engine.RelojMutable;
 import com.ioteste.engine.domain.ControladorRegistrado.BrokerMqtt;
+import java.net.ConnectException;
+import java.net.SocketTimeoutException;
 import java.time.Duration;
 import java.time.Instant;
 import org.junit.jupiter.api.BeforeEach;
@@ -132,6 +135,42 @@ class SimuladorRegistroServiceTest {
         registro.mantenerRegistro();
 
         simulador.verify();
+    }
+
+    @Test
+    void siElSimuladorNoEstabaCorriendoAlVolverSeRegistraDeNuevoAunqueNoOfrezcaElListado() {
+        // ecowarm-check no ofrece el listado: sin esto, el controlador daba por vigente el registro del simulador
+        // anterior y el nuevo nunca lo conocía
+        esperarRegistro();
+        simulador.expect(requestTo(CONTROLADORES)).andExpect(method(HttpMethod.GET))
+                .andRespond(withException(new ConnectException("Connection refused")));
+        esperarRegistro();
+
+        registro.mantenerRegistro();
+        clock.avanzar(SimuladorRegistroService.VERIFICACION);
+        registro.mantenerRegistro(); // no estaba corriendo
+        clock.avanzar(SimuladorRegistroService.REINTENTO);
+        registro.mantenerRegistro(); // volvió: se registra sin preguntar
+
+        simulador.verify();
+    }
+
+    @Test
+    void unSimuladorQueTardaEnContestarNoHaceQueSeVuelvaARegistrar() {
+        // Sigue corriendo: registrarse de nuevo en medio de una corrida podría reiniciarla
+        esperarRegistro();
+        simulador.expect(requestTo(CONTROLADORES)).andExpect(method(HttpMethod.GET))
+                .andRespond(withException(new SocketTimeoutException("Read timed out")));
+        simulador.expect(requestTo(CONTROLADORES)).andExpect(method(HttpMethod.GET))
+                .andRespond(withStatus(HttpStatus.NOT_FOUND));
+
+        registro.mantenerRegistro();
+        clock.avanzar(SimuladorRegistroService.VERIFICACION);
+        registro.mantenerRegistro();
+        clock.avanzar(SimuladorRegistroService.REINTENTO);
+        registro.mantenerRegistro();
+
+        simulador.verify(); // registro y dos verificaciones, sin un segundo POST
     }
 
     @Test

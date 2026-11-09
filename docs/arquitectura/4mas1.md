@@ -107,7 +107,7 @@ ioteste-domotica/
 
 ### Tests
 
-Son 232 (37 en `core`, 163 en `engine` y 32 en `mcp`), organizados por nivel. El detalle de cada uno está en [`docs/tests/criterio-tests.md`](../tests/criterio-tests.md).
+Son 234 (37 en `core`, 165 en `engine` y 32 en `mcp`), organizados por nivel. El detalle de cada uno está en [`docs/tests/criterio-tests.md`](../tests/criterio-tests.md).
 
 | Nivel | Dónde | Qué prueba | Necesita |
 |---|---|---|---|
@@ -146,7 +146,7 @@ El engine es un único proceso (una JVM) con cuatro flujos que corren en paralel
 | Flujo | Hilo | Cuándo corre | Qué hace |
 |---|---|---|---|
 | API REST | Hilos de Tomcat | A pedido del simulador | `PUT /sitio` valida el inventario, lo guarda en una sola transacción y publica el evento `InventarioReemplazado`. `POST /control/comandos` sincroniza el reloj simulado y programa o cancela el ciclo de control |
-| Registro (§6) | Scheduler | Cada 5 s hasta registrarse; después verifica cada 1 min | Se presenta ante el simulador y vuelve a registrarse si el simulador se reinició. Publica el broker que anuncia el simulador |
+| Registro (§6) | Scheduler | Cada 5 s hasta registrarse; después verifica cada 1 min | Se presenta ante el simulador y vuelve a registrarse si el simulador se reinició: si el listado dice que lo olvidó, o si el simulador no estaba corriendo y volvió ([D23](decisiones.md#d23-ante-un-simulador-que-vuelve-el-controlador-se-registra-de-nuevo)). Publica el broker que anuncia el simulador |
 | Recepción MQTT | Hilo de Paho | Por cada mensaje | Guarda cada lectura con la hora real en que llegó. Se suscribe a los topics del inventario al conectarse, en cada reconexión y con cada `InventarioReemplazado`. La primera conexión la reintenta un hilo propio (`mqtt-conexion`) cada 5 s; después Paho reconecta solo, con 4 s como máximo entre intentos ([D22](decisiones.md#d22-la-reconexión-al-broker-espera-como-mucho-4-s-entre-intentos)) |
 | Ciclo de control | Scheduler | Cada máx(500 ms, 30 s ÷ factor) reales, es decir, cada 30 s simulados | Ver [Ciclo de control](#ciclo-de-control) |
 
@@ -199,7 +199,7 @@ La máquina del controlador solo necesita Docker Desktop con Compose; Java hace 
 | De → a | Protocolo | Para qué | Dirección |
 |---|---|---|---|
 | Simulador → engine | HTTP, con la `X-API-Key` del engine | Cargar el sitio (`PUT /sitio`, §1) e iniciar o detener el control (`POST /control/comandos`, §5) | `CONTROLADOR_BASE_URL`, que el engine declara al registrarse |
-| Engine → simulador | HTTP, con la `X-API-Key` del simulador | Registrarse (§6): cada 5 s hasta lograrlo y después cada minuto, para volver a registrarse si el simulador se reinició | `SIMULADOR_URL` |
+| Engine → simulador | HTTP, con la `X-API-Key` del simulador | Registrarse (§6): cada 5 s hasta lograrlo y después cada minuto, para volver a registrarse si el simulador se reinició. Si el simulador no estaba corriendo, se registra de nuevo apenas vuelve | `SIMULADOR_URL` |
 | Engine → switches | HTTP | Consultar y comandar cada switch (§3 y §4) | El `urlSwitch` de cada habitación (o `SWITCHES_URL`) |
 | Engine → broker | MQTT | Recibir las lecturas de los topics del inventario (§2) | El broker que anuncia el simulador (o `MQTT_BROKER_URL`) |
 | Engine y MCP → PostgreSQL | JDBC | Guardar y leer el sitio y las lecturas (el MCP solo lee) | `DB_URL`: `postgres-db:5432` dentro de la red Docker |

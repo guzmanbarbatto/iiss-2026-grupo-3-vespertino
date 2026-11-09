@@ -14,6 +14,7 @@ Cada decisión indica cuándo se tomó (iteración y PR) y si sigue vigente. Las
 | [D04](#d04-cada-switch-en-el-urlswitch-de-su-habitación) | Cada switch en el `urlSwitch` de su habitación | Iteración 6 (PR #22) |
 | [D05](#d05-solo-se-comandan-los-switches-del-sitio-vigente) | Solo se comandan los switches del sitio vigente | Iteración 6 (PR #22) |
 | [D06](#d06-suscripción-exacta-a-los-topics-del-inventario) | Suscripción exacta a los topics del inventario | Iteración 6 (PR #21) |
+| [D23](#d23-ante-un-simulador-que-vuelve-el-controlador-se-registra-de-nuevo) | Ante un simulador que vuelve, el controlador se registra de nuevo | Iteración 6 (PR #33) |
 | | **Persistencia** | |
 | [D07](#d07-jdbc-y-un-esquema-idempotente-en-lugar-de-jpa) | JDBC y un esquema idempotente en lugar de JPA | Antes del Sprint 6 (PR #20) |
 | [D08](#d08-la-última-lectura-es-la-que-llegó-última) | La última lectura es la que llegó última | Iteración 6 (PR #22) |
@@ -94,6 +95,15 @@ Cada decisión indica cuándo se tomó (iteración y PR) y si sigue vigente. Las
 - **Decisión:** el engine se suscribe exactamente a los `topicTermostato` del inventario: al conectarse, en cada reconexión y en cada `PUT /sitio`. El validador rechaza un topic con comodines (`+` o `#`).
 - **Alternativas descartadas:** el comodín `#`, que escucharía todo el broker.
 - **Consecuencias:** el engine solo recibe lo que necesita, y un cambio de inventario ajusta la suscripción sin reiniciar.
+
+### D23. Ante un simulador que vuelve, el controlador se registra de nuevo
+
+**Iteración 6 (PR #33) · Vigente**
+
+- **Contexto:** después de registrarse, el engine verifica cada minuto, con el listado `GET /controladores`, que el simulador lo siga conociendo. Ese listado no está en el estándar, y si el simulador no lo ofrece, el engine daba el registro por vigente. Con el checker de la cátedra (`ecowarm-check`), que contesta `404`, un simulador nuevo nunca lo conocía: el checker dio 1 de 8.
+- **Decisión:** si el simulador rechaza la conexión (no está corriendo), cuando vuelve a responder el engine se registra de nuevo sin preguntar. El alta es idempotente por etiqueta (§6), así que repetirla no deja registros duplicados. Un timeout o un error HTTP no cuentan, porque ese simulador sigue corriendo.
+- **Alternativas descartadas:** registrarse de nuevo cada minuto. El `ecowarm-run` arranca su corrida cuando el controlador se registra, así que un registro repetido podría reiniciarla a la mitad.
+- **Consecuencias:** un simulador que se reinicia conoce al engine a los 5 s de volver, ofrezca o no el listado. Si se reinicia entre dos verificaciones y no ofrece el listado, el engine no lo nota ([L18](roadmap.md)).
 
 ## Persistencia
 

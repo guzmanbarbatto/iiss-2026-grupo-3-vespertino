@@ -2,6 +2,7 @@ package com.ioteste.engine.service;
 
 import com.ioteste.engine.domain.AltaControlador;
 import com.ioteste.engine.domain.ControladorRegistrado;
+import java.net.ConnectException;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -28,6 +29,11 @@ import org.springframework.web.client.RestTemplate;
  *
  * <p>Reintenta hasta registrarse. Después verifica cada minuto que el simulador lo siga conociendo: un
  * simulador reiniciado olvida los registros, y sin registro no puede llamar a este controlador.
+ *
+ * <p>Esa verificación usa el listado de controladores, que no está en el estándar: un simulador que no lo ofrece
+ * (como {@code ecowarm-check}) no puede decir si se reinició. Por eso, si el simulador rechazó la conexión (no estaba
+ * corriendo), cuando vuelve a responder el controlador se registra de nuevo sin preguntar: el alta es idempotente por
+ * etiqueta (§6). Antes daba el registro por vigente y quedaba sin registrar ante un simulador nuevo.
  */
 @Service
 public class SimuladorRegistroService {
@@ -101,6 +107,12 @@ public class SimuladorRegistroService {
             respondio();
             proximaVerificacion = ahora.plus(VERIFICACION);
         } catch (RestClientException e) {
+            if (e.getMostSpecificCause() instanceof ConnectException) {
+                // No estaba corriendo: el que vuelva puede ser un simulador nuevo, sin este registro. Un timeout o
+                // un error HTTP no cuentan: ese simulador sigue corriendo, y registrarse de nuevo en medio de una
+                // corrida podría reiniciarla
+                proximaVerificacion = null;
+            }
             if (fallas.empezo(SIMULADOR)) {
                 LOG.warn("El simulador no responde en {} ({}). Se reintenta cada {} s; se avisará cuando responda",
                         endpoint, e.getMessage(), REINTENTO.toSeconds());
