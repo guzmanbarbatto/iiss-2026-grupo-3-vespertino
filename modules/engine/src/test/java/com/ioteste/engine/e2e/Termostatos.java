@@ -34,6 +34,9 @@ final class Termostatos implements AutoCloseable {
         cliente.setTimeToWait(2000);
         MqttConnectOptions opciones = new MqttConnectOptions();
         opciones.setAutomaticReconnect(true);
+        // El mismo tope que el engine: Paho guarda la espera entre reintentos en un campo estático, compartido por
+        // todos los clientes de la JVM, y este cliente sin tope la duplicaba también para el del engine
+        opciones.setMaxReconnectDelay(4_000);
         opciones.setCleanSession(true);
         cliente.connect(opciones);
         hilo.scheduleAtFixedRate(this::publicar, 0, PERIODO.toMillis(), TimeUnit.MILLISECONDS);

@@ -2,7 +2,7 @@
 
 EcoWarm es el controlador de calefacción del **Grupo 3** (IISS 2026, UTEC). Cada 30 segundos de tiempo simulado decide qué habitaciones calentar según su temperatura, la potencia contratada y la tarifa punta, y comanda los calefactores con los dispositivos del estándar `interop-v2`: termostatos que publican por MQTT y switches que se manejan por HTTP. En el curso, esos dispositivos los provee el simulador de la cátedra.
 
-> **Estado al traspaso (Iteración 6, noviembre de 2026).** El controlador pasa los 9 escenarios de `ecowarm-run` sin ninguna expectativa en rojo, y fue el único de los cuatro grupos que pasó los tres escenarios que corrió el profesor el 4/11. Tiene 220 tests y el CI los corre en cada pull request. Lo que falta y las limitaciones conocidas están en [`docs/arquitectura/roadmap.md`](docs/arquitectura/roadmap.md).
+> **Estado al traspaso (Iteración 6, noviembre de 2026).** El controlador pasa los 9 escenarios de `ecowarm-run` sin ninguna expectativa en rojo, y fue el único de los cuatro grupos que pasó los tres escenarios que corrió el profesor el 4/11. Tiene 232 tests y el CI los corre en cada pull request. Lo que falta y las limitaciones conocidas están en [`docs/arquitectura/roadmap.md`](docs/arquitectura/roadmap.md).
 >
 > **Si van a tomar el proyecto, empiecen por la [guía para el equipo receptor](docs/guia-equipo-receptor.md):** qué pedir, un plan para la primera semana, un recorrido por el código y qué cuidar al cambiarlo.
 
@@ -21,7 +21,7 @@ EcoWarm es el controlador de calefacción del **Grupo 3** (IISS 2026, UTEC). Cad
 
 | Pieza | Dónde | Estado |
 |---|---|---|
-| Código: reglas de control (`core`), controlador (`engine`) y servidor MCP para agentes de IA (`mcp`) | [`modules/`](modules/) | Java 25 y Spring Boot 3.5. 220 tests en verde |
+| Código: reglas de control (`core`), controlador (`engine`) y servidor MCP para agentes de IA (`mcp`) | [`modules/`](modules/) | Java 25 y Spring Boot 3.5. 232 tests en verde |
 | Despliegue con Docker Compose y scripts | [`docker/`](docker/) y [`scripts/`](scripts/) | Probado en Windows con Docker Desktop. En Linux hace falta un ajuste (ver [problemas conocidos](#5-problemas-conocidos-y-cómo-resolverlos)) |
 | Integración continua | [`.github/workflows/maven.yml`](.github/workflows/maven.yml) | Corre en cada pull request y en cada push a `main` |
 | Documentación de arquitectura, contratos, tests, calidad y producto | [`docs/`](docs/) | Ver el [mapa de la documentación](#7-mapa-de-la-documentación) |
@@ -135,7 +135,7 @@ Los que encontramos durante el desarrollo y las pruebas con la cátedra:
 ## 6. Desarrollo
 
 - **Build y calidad:** `mvn clean verify` desde la raíz compila los tres módulos, corre los tests y los controles. Checkstyle aplica [`google_checks.xml`](google_checks.xml) (líneas de hasta 120 columnas, también en los tests), y una sola violación corta el build. JaCoCo exige 85 % de cobertura en `core`; el reporte está en [`docs/calidad/cobertura/index.html`](docs/calidad/cobertura/index.html). Las convenciones del equipo están en [`docs/calidad/estandares_de_codificacion.md`](docs/calidad/estandares_de_codificacion.md).
-- **Tests:** 220 (37 en `core`, 151 en `engine` y 32 en `mcp`), entre ellos un test de punta a punta con 14 escenarios, contra PostgreSQL y Mosquitto reales (Testcontainers). El criterio de cada uno está en [`docs/tests/criterio-tests.md`](docs/tests/criterio-tests.md).
+- **Tests:** 232 (37 en `core`, 163 en `engine` y 32 en `mcp`), entre ellos un test de punta a punta con 22 escenarios, contra PostgreSQL y Mosquitto reales (Testcontainers). El criterio de cada uno está en [`docs/tests/criterio-tests.md`](docs/tests/criterio-tests.md).
 - **Validación con la cátedra:** `ecowarm-run` (paso 4 de la [puesta en marcha](#2-puesta-en-marcha)) antes de entregar.
 - **Cómo trabajamos:**
   - Una rama por cambio desde `main`, con nombre `Sprint<N>-<Tema>`.

@@ -16,7 +16,7 @@ EcoWarm es el controlador de calefacción de una casa. Cada 30 segundos de tiemp
 
 Los contratos están en [`docs/api/`](api/).
 
-**Estado:** pasa los 9 escenarios de `ecowarm-run` sin ninguna expectativa en rojo y los escenarios que corrió el profesor. Tiene 220 tests, y el CI los corre en cada pull request. Lo que no está validado y las limitaciones conocidas están en el [roadmap](arquitectura/roadmap.md).
+**Estado:** pasa los 9 escenarios de `ecowarm-run` sin ninguna expectativa en rojo y los escenarios que corrió el profesor. Tiene 232 tests, y el CI los corre en cada pull request. Lo que no está validado y las limitaciones conocidas están en el [roadmap](arquitectura/roadmap.md).
 
 ### Antes de empezar, pidan esto
 
@@ -30,7 +30,7 @@ Los contratos están en [`docs/api/`](api/).
 
 | Día | Qué hacer | Resultado esperado |
 |---|---|---|
-| 1 | Levantar el sistema con la [puesta en marcha del README](../README.md#2-puesta-en-marcha), correr `mvn clean verify` y `ecowarm-run ... todos` | 220 tests en verde, ninguno omitido; 9 de 9 escenarios. Si algo no da, mirar los [problemas conocidos](../README.md#5-problemas-conocidos-y-cómo-resolverlos) |
+| 1 | Levantar el sistema con la [puesta en marcha del README](../README.md#2-puesta-en-marcha), correr `mvn clean verify` y `ecowarm-run ... todos` | 232 tests en verde, ninguno omitido; 9 de 9 escenarios. Si algo no da, mirar los [problemas conocidos](../README.md#5-problemas-conocidos-y-cómo-resolverlos) |
 | 2 | Leer el [4+1](arquitectura/4mas1.md) en este orden: Lógica, Procesos, Física, Desarrollo y Escenarios. Después, las [decisiones](arquitectura/decisiones.md) | Saber qué hace cada pieza y por qué está hecha así |
 | 3 | Recorrer el código con la tabla de la sección 3, con un test abierto al lado de cada clase | Poder explicar un ciclo de control de punta a punta |
 | 4 y 5 | Hacer un primer cambio chico con el circuito completo (sección 4). Candidatos: R6 (soporte de Linux) o R4 (salud y reinicio) del [roadmap](arquitectura/roadmap.md#3-roadmap) | Un PR mergeado, con el CI en verde |
@@ -50,7 +50,7 @@ Los contratos están en [`docs/api/`](api/).
 | El tiempo simulado | [`RelojControl`](../modules/engine/src/main/java/com/ioteste/engine/service/RelojControl.java) | Cómo se calcula la hora simulada a partir del `INICIAR` |
 | El esquema | [`schema.sql`](../modules/engine/src/main/resources/schema.sql) | Por qué todo es `IF NOT EXISTS` o `IF EXISTS` |
 | El servidor MCP | [`EcoWarmTools`](../modules/mcp/src/main/java/com/ioteste/mcp/tools/EcoWarmTools.java) | Las 7 tools, y su [4+1](mcp/4mas1-mcp.md) |
-| Cómo se prueba todo junto | [`PuntaAPuntaTest`](../modules/engine/src/test/java/com/ioteste/engine/e2e/PuntaAPuntaTest.java) | 14 escenarios con PostgreSQL y Mosquitto reales, un simulador y unos termostatos falsos |
+| Cómo se prueba todo junto | [`PuntaAPuntaTest`](../modules/engine/src/test/java/com/ioteste/engine/e2e/PuntaAPuntaTest.java) | 22 escenarios con PostgreSQL y Mosquitto reales, un simulador y unos termostatos falsos |
 
 ## 4. Cómo hacer un cambio
 

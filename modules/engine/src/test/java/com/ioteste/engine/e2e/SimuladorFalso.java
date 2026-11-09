@@ -5,9 +5,12 @@ import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
 import java.net.InetSocketAddress;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
@@ -25,7 +28,8 @@ import java.util.regex.Pattern;
  * qué ruta llegó. Lleva la cuenta de los comandos, de las consultas de estado y de la mayor potencia que llegó
  * a estar encendida a la vez. Puede "caerse": mientras está caído corta cada conexión sin responder, como un
  * servidor que no está. También puede "perder los OFF": la conexión de cada OFF queda colgada más que el timeout
- * del engine y el switch no se apaga (la falla F05 de {@code ecowarm-run}).
+ * del engine y el switch no se apaga (la falla F05 de {@code ecowarm-run}). Y a cada switch se le puede poner una
+ * {@link Falla} propia, como las de los escenarios F06 a F09.
  */
 final class SimuladorFalso implements AutoCloseable {
 
@@ -33,6 +37,22 @@ final class SimuladorFalso implements AutoCloseable {
     private static final Pattern COMANDO = Pattern.compile("(.*)/switches/([^/]+)/comandos");
     /** Más que el timeout del engine (1 s): el OFF no recibe respuesta. */
     private static final long OFF_COLGADO_MS = 2_500;
+
+    /** Cómo puede fallar un switch, además de caerse todo el simulador. */
+    enum Falla {
+        /** El OFF responde con un error HTTP y el switch sigue como estaba (F06). */
+        OFF_CON_ERROR,
+        /** El ON responde con un error HTTP y el switch sigue como estaba (F09). */
+        ON_CON_ERROR,
+        /** La consulta responde 503; los comandos sí funcionan (F08). */
+        CONSULTA_NO_DISPONIBLE,
+        /** La consulta trae el estado en minúsculas, fuera del contrato (F07). */
+        ESTADO_EN_MINUSCULAS,
+        /** La consulta responde texto que no es JSON (F07). */
+        RESPUESTA_EN_TEXTO,
+        /** Tarda más que el timeout del engine en contestar, pero obedece (F07). */
+        LENTO
+    }
 
     private final HttpServer servidor;
     /**
@@ -51,6 +71,7 @@ final class SimuladorFalso implements AutoCloseable {
     private final List<Map<?, ?>> registros = new CopyOnWriteArrayList<>();
     private volatile boolean caido;
     private volatile boolean offPerdidos;
+    private final Map<String, Set<Falla>> fallas = new ConcurrentHashMap<>();
     private double potenciaMaxima;
 
     /** Un comando aplicado: a qué switch, qué acción, cuándo (hora real) y bajo qué ruta base llegó. */
@@ -81,6 +102,20 @@ final class SimuladorFalso implements AutoCloseable {
         potenciaMaxima = 0;
         caido = false;
         offPerdidos = false;
+        fallas.clear();
+    }
+
+    /** A partir de ahora el switch falla de esas maneras, hasta {@link #sanar} o {@link #reiniciar}. */
+    void fallar(String idSwitch, Falla... comoFalla) {
+        fallas.put(idSwitch, Set.of(comoFalla));
+    }
+
+    void sanar(String idSwitch) {
+        fallas.remove(idSwitch);
+    }
+
+    private boolean falla(String idSwitch, Falla falla) {
+        return fallas.getOrDefault(idSwitch, Set.of()).contains(falla);
     }
 
     void caer() {
@@ -174,8 +209,18 @@ final class SimuladorFalso implements AutoCloseable {
             responder(intercambio, 404, Map.of("status", 404, "mensaje", "no existe el switch " + idSwitch));
             return;
         }
-        responder(intercambio, 200, Map.of("idSwitch", idSwitch, "estado", estado,
-                "actualizadoEn", Instant.now().toString()));
+        if (falla(idSwitch, Falla.LENTO)) {
+            demorar(OFF_COLGADO_MS);
+        }
+        if (falla(idSwitch, Falla.CONSULTA_NO_DISPONIBLE)) {
+            responder(intercambio, 503, Map.of("status", 503, "mensaje", "el switch no está disponible"));
+        } else if (falla(idSwitch, Falla.RESPUESTA_EN_TEXTO)) {
+            responderTexto(intercambio, estado);
+        } else {
+            String informado = falla(idSwitch, Falla.ESTADO_EN_MINUSCULAS) ? estado.toLowerCase(Locale.ROOT) : estado;
+            responder(intercambio, 200, Map.of("idSwitch", idSwitch, "estado", informado,
+                    "actualizadoEn", Instant.now().toString()));
+        }
     }
 
     private void comandar(HttpExchange intercambio, String idSwitch, String ruta) throws IOException {
@@ -189,8 +234,16 @@ final class SimuladorFalso implements AutoCloseable {
             return;
         }
         if (offPerdidos && "OFF".equals(accion)) {
-            colgar(); // no se aplica ni se responde
+            demorar(OFF_COLGADO_MS); // no se aplica ni se responde
             return;
+        }
+        if ("OFF".equals(accion) && falla(idSwitch, Falla.OFF_CON_ERROR)
+                || "ON".equals(accion) && falla(idSwitch, Falla.ON_CON_ERROR)) {
+            responder(intercambio, 500, Map.of("status", 500, "mensaje", "el switch no pudo cumplir " + accion));
+            return;
+        }
+        if (falla(idSwitch, Falla.LENTO)) {
+            demorar(OFF_COLGADO_MS); // obedece, pero el engine ya cortó por timeout
         }
         boolean cambio = aplicar(idSwitch, (String) accion, ruta);
         responder(intercambio, 200, Map.of("idSwitch", idSwitch, "estado", accion, "cambio", cambio,
@@ -204,12 +257,19 @@ final class SimuladorFalso implements AutoCloseable {
         return cambio;
     }
 
-    private static void colgar() {
+    private static void demorar(long milisegundos) {
         try {
-            Thread.sleep(OFF_COLGADO_MS);
+            Thread.sleep(milisegundos);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }
+    }
+
+    private static void responderTexto(HttpExchange intercambio, String texto) throws IOException {
+        byte[] bytes = texto.getBytes(StandardCharsets.UTF_8);
+        intercambio.getResponseHeaders().set("Content-Type", "text/plain;charset=UTF-8");
+        intercambio.sendResponseHeaders(200, bytes.length);
+        intercambio.getResponseBody().write(bytes);
     }
 
     private void responder(HttpExchange intercambio, int status, Object cuerpo) throws IOException {

@@ -505,6 +505,83 @@ class EvaluadorJobServiceTest {
         assertThat(salida.getOut().split("Los apagados se vuelven a confirmar", -1)).hasSize(2);
     }
 
+    // ---------------------------------------------------------------- encendidos que el switch rechaza
+
+    @Test
+    void siUnSwitchRechazaElOnSuPotenciaVaAOtraHabitacionQueEntra() {
+        // Con 3 kW, lo que más aprovecha es hab-1 con hab-2 (2,5 kW). Si el switch de hab-1 no acepta el ON y sigue
+        // apagado, volver a elegirla le guardaría potencia que no usa: hab-3 entra en su lugar
+        iniciarEn(MARTES_10HS);
+        sitio(3.0, habitacion("1", 22.0, 1.5), habitacion("2", 22.0, 1.0), habitacion("3", 22.0, 1.0));
+        lectura("1", 12.0);
+        lectura("2", 15.0);
+        lectura("3", 16.0);
+        when(switchClient.consultarEstado(URL_SW, "sw-1")).thenReturn(EstadoSwitch.OFF);
+        when(switchClient.consultarEstado(URL_SW, "sw-2")).thenReturn(EstadoSwitch.OFF, EstadoSwitch.ON);
+        when(switchClient.consultarEstado(URL_SW, "sw-3")).thenReturn(EstadoSwitch.OFF);
+        when(switchClient.comandarSwitch(URL_SW, "sw-1", "ON")).thenReturn(Resultado.FALLIDO);
+        when(switchClient.comandarSwitch(URL_SW, "sw-2", "ON")).thenReturn(Resultado.APLICADO);
+
+        motor.ejecutarCicloDeControl();
+        verify(switchClient, never()).comandarSwitch(URL_SW, "sw-3", "ON");
+
+        motor.ejecutarCicloDeControl();
+        verify(switchClient, times(1)).comandarSwitch(URL_SW, "sw-1", "ON");
+        verify(switchClient).comandarSwitch(URL_SW, "sw-3", "ON");
+    }
+
+    @Test
+    @ExtendWith(OutputCaptureExtension.class)
+    void elOnRechazadoSeReintentaPasadosLosCiclosDeEsperaYSeAvisaUnaVezYOtraAlRecuperarse(CapturedOutput salida) {
+        iniciarEn(MARTES_10HS);
+        sitio(3.0, habitacion("1", 22.0, 1.5));
+        lectura("1", 15.0);
+        when(switchClient.consultarEstado(URL_SW, "sw-1")).thenReturn(EstadoSwitch.OFF);
+        when(switchClient.comandarSwitch(URL_SW, "sw-1", "ON")).thenReturn(Resultado.FALLIDO, Resultado.APLICADO);
+
+        // El ciclo en que falla y los de espera: no se reintenta
+        for (int i = 0; i <= EvaluadorJobService.CICLOS_SIN_REINTENTAR_ON; i++) {
+            motor.ejecutarCicloDeControl();
+        }
+        verify(switchClient, times(1)).comandarSwitch(URL_SW, "sw-1", "ON");
+
+        motor.ejecutarCicloDeControl();
+        verify(switchClient, times(2)).comandarSwitch(URL_SW, "sw-1", "ON");
+        assertThat(salida.getOut().split("El switch de hab-1 no confirmó el ON", -1)).hasSize(2);
+        assertThat(salida.getOut().split("El switch de hab-1 vuelve a confirmar el ON", -1)).hasSize(2);
+    }
+
+    @Test
+    void siElOnRechazadoIgualLlegoLaHabitacionSigueEnElRepartoYSePuedeApagar() {
+        // El ON salió pero la respuesta se perdió: si el switch quedó encendido, el core tiene que poder apagarlo
+        iniciarEn(MARTES_10HS);
+        sitio(3.0, habitacion("1", 22.0, 1.5));
+        lectura("1", 15.0);
+        when(switchClient.consultarEstado(URL_SW, "sw-1")).thenReturn(EstadoSwitch.OFF, EstadoSwitch.ON);
+        when(switchClient.comandarSwitch(URL_SW, "sw-1", "ON")).thenReturn(Resultado.FALLIDO);
+
+        motor.ejecutarCicloDeControl();
+        lectura("1", 25.0);
+        motor.ejecutarCicloDeControl();
+
+        verify(switchClient).comandarSwitch(URL_SW, "sw-1", "OFF");
+    }
+
+    @Test
+    void alIniciarElControlLasHabitacionesConUnOnRechazadoVuelvenAlReparto() {
+        iniciarEn(MARTES_10HS);
+        sitio(3.0, habitacion("1", 22.0, 1.5));
+        lectura("1", 15.0);
+        when(switchClient.consultarEstado(URL_SW, "sw-1")).thenReturn(EstadoSwitch.OFF);
+        when(switchClient.comandarSwitch(URL_SW, "sw-1", "ON")).thenReturn(Resultado.FALLIDO, Resultado.APLICADO);
+
+        motor.ejecutarCicloDeControl();
+        iniciarEn(MARTES_10HS);
+        motor.ejecutarCicloDeControl();
+
+        verify(switchClient, times(2)).comandarSwitch(URL_SW, "sw-1", "ON");
+    }
+
     @Test
     void cadaSwitchSeConsultaYSeComandaEnElUrlSwitchDeSuHabitacion() {
         // §3 y §4: los switches de un sitio pueden estar en servidores distintos

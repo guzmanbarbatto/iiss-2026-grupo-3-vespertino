@@ -33,6 +33,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledFuture;
@@ -65,6 +66,12 @@ public class EvaluadorJobService {
     static final Duration SILENCIO_MINIMO_REAL = Duration.ofSeconds(2);
     /** Temperatura que se asume sin lecturas válidas: fuerza el apagado (fail-safe). */
     static final double TEMPERATURA_FAIL_SAFE = 99.0;
+    /**
+     * Ciclos que una habitación queda fuera del reparto cuando su switch rechazó el {@code ON} y sigue apagado. Si
+     * no, el core la volvía a elegir en cada ciclo y le guardaba una potencia que nunca usaba, mientras otras
+     * habitaciones que sí entraban se quedaban sin calor.
+     */
+    static final int CICLOS_SIN_REINTENTAR_ON = 4;
     private static final DateTimeFormatter DIA_HORA = DateTimeFormatter.ofPattern("dd/MM HH:mm");
     private static final String[] DIAS = {"lun", "mar", "mié", "jue", "vie", "sáb", "dom"};
 
@@ -78,6 +85,7 @@ public class EvaluadorJobService {
     private static final String FALLA_CICLO = "ciclo";
     private static final String FALLA_SIN_SITIO = "sin-sitio";
     private static final String FALLA_ON_POSTERGADO = "on-postergado";
+    private static final String FALLA_ON_RECHAZADO = "on-rechazado:";
     /** Tolerancia de redondeo al comparar potencias (la misma idea que en el core). */
     private static final double TOLERANCIA_KW = 1e-9;
 
@@ -89,6 +97,8 @@ public class EvaluadorJobService {
      */
     private volatile boolean enEjecucion;
     private final FallasActivas fallas = new FallasActivas();
+    /** Habitaciones cuyo switch rechazó el {@code ON}, con los ciclos que les faltan para volver al reparto. */
+    private final Map<String, Integer> onRechazado = new ConcurrentHashMap<>();
     private volatile List<String> ultimoSinLecturas = List.of();
     /** Hasta dónde se mira la tarifa punta: si empieza antes, se apaga ya (ver {@link #iniciarMotor}). */
     private volatile Duration anticipacionPunta = Duration.ZERO;
@@ -111,6 +121,7 @@ public class EvaluadorJobService {
         cancelarTarea();
         reloj.sincronizar(fechaHora, factorTiempo);
         switchClient.olvidarEstados(); // al arrancar no se confía en lo que se sabía: se relee cada switch
+        onRechazado.clear(); // y todas las habitaciones vuelven al reparto
         long intervaloReal = Math.max(INTERVALO_MINIMO_REAL_MS, (long) (INTERVALO_LOGICO_MS / factorTiempo));
         // Dos ciclos simulados: el próximo y un margen por la demora del ciclo y de los comandos. Así ningún
         // calefactor queda encendido dentro de la punta esperando a que el ciclo siguiente la detecte
@@ -199,7 +210,7 @@ public class EvaluadorJobService {
 
         Salida salida = evaluadorCore.evaluarEstado(ahora, anticipacionPunta,
                 inventario.sitio().potenciaContratadaKW(), tarifaPunta(inventario.sitio().tarifa().punta()),
-                habitaciones);
+                sinLasQueRechazaronElOn(habitaciones));
 
         double contratada = inventario.sitio().potenciaContratadaKW();
         Map<String, EstadoSwitch> estadoFinal = new LinkedHashMap<>();
@@ -261,14 +272,47 @@ public class EvaluadorJobService {
             if (resultados.get(i) == null) {
                 continue;
             }
+            boolean encender = orden.accion() == AccionSwitch.ON;
             if (resultados.get(i) == Resultado.APLICADO) {
                 cambios.add(orden.idHabitacion() + " → " + orden.accion());
-                estadoFinal.put(orden.idHabitacion(),
-                        orden.accion() == AccionSwitch.ON ? EstadoSwitch.ON : EstadoSwitch.OFF);
+                estadoFinal.put(orden.idHabitacion(), encender ? EstadoSwitch.ON : EstadoSwitch.OFF);
+                if (encender && fallas.termino(FALLA_ON_RECHAZADO + orden.idHabitacion())) {
+                    LOG.info("El switch de {} vuelve a confirmar el ON", orden.idHabitacion());
+                }
             } else {
                 estadoFinal.put(orden.idHabitacion(), EstadoSwitch.DESCONOCIDO);
+                if (encender) {
+                    rechazoElOn(orden.idHabitacion());
+                }
             }
         }
+    }
+
+    private void rechazoElOn(String idHabitacion) {
+        onRechazado.put(idHabitacion, CICLOS_SIN_REINTENTAR_ON);
+        if (fallas.empezo(FALLA_ON_RECHAZADO + idHabitacion)) {
+            LOG.warn("El switch de {} no confirmó el ON: mientras siga apagado, se deja fuera del reparto {} ciclos "
+                    + "para que la potencia vaya a otras habitaciones, y se reintenta", idHabitacion,
+                    CICLOS_SIN_REINTENTAR_ON);
+        }
+    }
+
+    /**
+     * Lo que se le pasa al core: todas las habitaciones menos las que tienen un switch que rechazó el {@code ON} hace
+     * menos de {@link #CICLOS_SIN_REINTENTAR_ON} ciclos y sigue apagado. Si quedó encendido o en un estado
+     * desconocido (por ejemplo, el {@code ON} llegó pero la respuesta se perdió), sigue en el reparto: el core tiene
+     * que contar su potencia y poder apagarlo.
+     */
+    private List<HabitacionDTO> sinLasQueRechazaronElOn(List<HabitacionDTO> habitaciones) {
+        if (onRechazado.isEmpty()) {
+            return habitaciones;
+        }
+        List<HabitacionDTO> enElReparto = habitaciones.stream()
+                .filter(h -> h.estadoActual() != EstadoSwitch.OFF || !onRechazado.containsKey(h.id()))
+                .toList();
+        onRechazado.replaceAll((id, ciclos) -> ciclos - 1);
+        onRechazado.values().removeIf(ciclos -> ciclos <= 0);
+        return enElReparto;
     }
 
     /**

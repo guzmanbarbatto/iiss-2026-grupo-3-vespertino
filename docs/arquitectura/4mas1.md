@@ -107,7 +107,7 @@ ioteste-domotica/
 
 ### Tests
 
-Son 220 (37 en `core`, 151 en `engine` y 32 en `mcp`), organizados por nivel. El detalle de cada uno está en [`docs/tests/criterio-tests.md`](../tests/criterio-tests.md).
+Son 232 (37 en `core`, 163 en `engine` y 32 en `mcp`), organizados por nivel. El detalle de cada uno está en [`docs/tests/criterio-tests.md`](../tests/criterio-tests.md).
 
 | Nivel | Dónde | Qué prueba | Necesita |
 |---|---|---|---|
@@ -115,7 +115,7 @@ Son 220 (37 en `core`, 151 en `engine` y 32 en `mcp`), organizados por nivel. El
 | Servicios | `engine.service` (con Mockito) | El ciclo de control, los switches, MQTT, el registro y la validación del inventario | Nada |
 | API | `engine.controller`: `ApiRestTest` (`@WebMvcTest`) | La API REST contra el contrato | Nada |
 | Repositorios | `engine.repository` y `mcp.repository` | El SQL contra un PostgreSQL real | Docker (Testcontainers) |
-| Punta a punta | `engine.e2e`: `PuntaAPuntaTest` | El engine completo con PostgreSQL y Mosquitto reales, un simulador y termostatos falsos: 14 escenarios normales y de falla | Docker (Testcontainers) |
+| Punta a punta | `engine.e2e`: `PuntaAPuntaTest` | El engine completo con PostgreSQL y Mosquitto reales, un simulador y termostatos falsos: 22 escenarios normales y de falla | Docker (Testcontainers) |
 | MCP | `mcp` | Las tools, los clientes HTTP y el servidor | Docker para su repositorio |
 
 Sin Docker, los tests con Testcontainers se omiten en silencio. Por eso el CI falla si se omite alguno.
@@ -147,7 +147,7 @@ El engine es un único proceso (una JVM) con cuatro flujos que corren en paralel
 |---|---|---|---|
 | API REST | Hilos de Tomcat | A pedido del simulador | `PUT /sitio` valida el inventario, lo guarda en una sola transacción y publica el evento `InventarioReemplazado`. `POST /control/comandos` sincroniza el reloj simulado y programa o cancela el ciclo de control |
 | Registro (§6) | Scheduler | Cada 5 s hasta registrarse; después verifica cada 1 min | Se presenta ante el simulador y vuelve a registrarse si el simulador se reinició. Publica el broker que anuncia el simulador |
-| Recepción MQTT | Hilo de Paho | Por cada mensaje | Guarda cada lectura con la hora real en que llegó. Se suscribe a los topics del inventario al conectarse, en cada reconexión y con cada `InventarioReemplazado`. La primera conexión la reintenta un hilo propio (`mqtt-conexion`) cada 5 s; después Paho reconecta solo |
+| Recepción MQTT | Hilo de Paho | Por cada mensaje | Guarda cada lectura con la hora real en que llegó. Se suscribe a los topics del inventario al conectarse, en cada reconexión y con cada `InventarioReemplazado`. La primera conexión la reintenta un hilo propio (`mqtt-conexion`) cada 5 s; después Paho reconecta solo, con 4 s como máximo entre intentos ([D22](decisiones.md#d22-la-reconexión-al-broker-espera-como-mucho-4-s-entre-intentos)) |
 | Ciclo de control | Scheduler | Cada máx(500 ms, 30 s ÷ factor) reales, es decir, cada 30 s simulados | Ver [Ciclo de control](#ciclo-de-control) |
 
 **Por qué los flujos no se pisan:**
@@ -171,6 +171,7 @@ Además, en cada ciclo:
 * **Un mensaje fuera del contrato (§2) no es una lectura.** `MqttSubscriberService` descarta el mensaje que no es un objeto JSON, el que no trae `tC`, el que trae `tC` como texto (`"20.0"`) y el que trae una temperatura fuera del rango plausible de una habitación, de −10 a 50 °C: −40 °C y 85 °C son valores de error de los sensores. El termostato queda como si estuviera callado, así que el fail-safe apaga su habitación. Se avisa una vez cuando empieza a mandar mal y otra cuando se recupera.
 * **Una lectura vieja no se usa.** La lectura de un termostato vale mientras no hayan pasado 600 s simulados o 3 lecturas perdidas, lo que sea mayor, con un piso de 2 s. El ritmo de cada termostato se mide con sus últimas lecturas. Si la lectura venció, el engine usa 99 °C (fail-safe) y la habitación se apaga.
 * **Las órdenes `OFF` van antes que las `ON`**, para liberar potencia antes de volver a ocuparla: primero salen todos los `OFF`, a la vez, y recién cuando terminan, todos los `ON`. Si un `OFF` falla, esa habitación se cuenta como encendida: un `ON` que con ella no entra en la contratada se posterga al ciclo siguiente.
+* **Un switch que no confirma el `ON` no se queda con la potencia.** Si sigue apagado, su habitación queda fuera del reparto 4 ciclos y la potencia va a otra que entre; después se reintenta ([D21](decisiones.md#d21-un-switch-que-rechaza-el-on-sale-del-reparto-unos-ciclos)).
 * **Un switch que no contesta no frena el control.** Cada llamada espera como mucho 3 s para conectar (en Wi-Fi, un paquete de conexión perdido se reintenta recién al segundo) y 1 s para la respuesta (un switch colgado, como en F05, acepta la conexión y no contesta); después se da por fallada y se reintenta en el ciclo siguiente. Como las llamadas de cada tanda van a la vez, un ciclo con switches colgados se demora a lo sumo un timeout por tanda (consultas, `OFF`, `ON`), no uno por switch. Antes, de a una y con 2 s, diez switches colgados dejaban el control sin evaluar 40 s reales: 40 minutos simulados con ×60.
 
 Las fuentes de los diagramas de esta vista están en [`diagramas/`](diagramas/).
