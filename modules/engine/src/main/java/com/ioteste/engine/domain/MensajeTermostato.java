@@ -1,13 +1,10 @@
 package com.ioteste.engine.domain;
 
-import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
-
 /**
- * Mensaje que publica un termostato por MQTT. Se ignoran los campos que no se usan para que un
- * campo extra en el payload no haga descartar la lectura. {@code ts} (epoch en segundos) puede faltar.
+ * Lectura válida de un termostato (§2): la temperatura en °C y, si vino, el {@code ts} del mensaje (epoch en
+ * segundos). La valida {@code MqttSubscriberService}: un mensaje fuera del contrato nunca llega a ser una lectura.
  */
-@JsonIgnoreProperties(ignoreUnknown = true)
 public record MensajeTermostato(
-    Double tC,
+    double tC,
     Double ts
 ) { }

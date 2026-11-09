@@ -82,6 +82,12 @@ public class EvaluadorJobService {
     private static final double TOLERANCIA_KW = 1e-9;
 
     private ScheduledFuture<?> tareaProgramada;
+    /**
+     * Si el control está en ejecución. Detener cancela los ciclos siguientes, pero no el que ya está corriendo: ese
+     * ciclo lo mira antes de cada tanda de comandos y antes de cada comando, y no comanda nada más (§5.2). Antes, un
+     * ciclo que esperaba a un switch lento mandaba su {@code ON} con el control ya detenido.
+     */
+    private volatile boolean enEjecucion;
     private final FallasActivas fallas = new FallasActivas();
     private volatile List<String> ultimoSinLecturas = List.of();
     /** Hasta dónde se mira la tarifa punta: si empieza antes, se apaga ya (ver {@link #iniciarMotor}). */
@@ -109,6 +115,7 @@ public class EvaluadorJobService {
         // Dos ciclos simulados: el próximo y un margen por la demora del ciclo y de los comandos. Así ningún
         // calefactor queda encendido dentro de la punta esperando a que el ciclo siguiente la detecte
         anticipacionPunta = Duration.ofMillis((long) (intervaloReal * factorTiempo)).multipliedBy(2);
+        enEjecucion = true;
         tareaProgramada = scheduler.scheduleAtFixedRate(this::ejecutarCicloDeControl, Duration.ofMillis(intervaloReal));
         LOG.info("Control iniciado: hora simulada {} (×{}, un ciclo cada {} ms)",
                 horaSimulada(fechaHora.atZone(RelojControl.ZONA_LOCAL)),
@@ -118,6 +125,7 @@ public class EvaluadorJobService {
 
     /** Detiene el control. Es idempotente y no apaga lo que haya quedado encendido. */
     public synchronized EstadoControl detenerMotor() {
+        enEjecucion = false; // primero: un ciclo en curso deja de comandar ya
         cancelarTarea();
         reloj.detener();
         LOG.info("Control detenido");
@@ -179,6 +187,10 @@ public class EvaluadorJobService {
                     estados.get(i)));
         }
 
+        if (!enEjecucion) {
+            LOG.debug("El control se detuvo mientras se consultaban los switches: el ciclo no comanda");
+            return;
+        }
         avisarSinLecturas(sinLecturasVigentes, ahora);
         if (LOG.isDebugEnabled()) {
             LOG.debug("Ciclo {} | potencia contratada {} kW | {}", ahora,
@@ -196,6 +208,11 @@ public class EvaluadorJobService {
         // Primero todos los apagados, a la vez, y recién cuando terminan los encendidos: así la potencia se libera
         // antes de volver a ocuparla, y un switch que no contesta no demora a los demás
         comandar(ordenes(salida, AccionSwitch.OFF), porId, estadoFinal, cambios);
+        if (!enEjecucion) {
+            LOG.debug("El control se detuvo mientras salían los apagados: no se enciende nada");
+            resumirSiHuboCambios(ahora, cambios, estadoFinal, habitaciones, contratada);
+            return;
+        }
 
         List<Orden> encendidos = new ArrayList<>();
         List<String> postergadas = new ArrayList<>();
@@ -212,6 +229,11 @@ public class EvaluadorJobService {
         }
         comandar(encendidos, porId, estadoFinal, cambios);
         avisarPostergadas(postergadas, ahora);
+        resumirSiHuboCambios(ahora, cambios, estadoFinal, habitaciones, contratada);
+    }
+
+    private static void resumirSiHuboCambios(ZonedDateTime ahora, List<String> cambios,
+            Map<String, EstadoSwitch> estadoFinal, List<HabitacionDTO> habitaciones, double contratada) {
         if (!cambios.isEmpty()) {
             resumirCiclo(ahora, cambios, estadoFinal, habitaciones, contratada);
         }
@@ -228,11 +250,17 @@ public class EvaluadorJobService {
     private void comandar(List<Orden> ordenes, Map<String, Habitacion> porId, Map<String, EstadoSwitch> estadoFinal,
             List<String> cambios) {
         List<Resultado> resultados = enParalelo(ordenes, orden -> {
+            if (!enEjecucion) {
+                return null; // el control se detuvo: esta orden no sale
+            }
             Habitacion hab = porId.get(orden.idHabitacion());
             return switchClient.comandarSwitch(hab.urlSwitch(), hab.idSwitch(), orden.accion().name());
         });
         for (int i = 0; i < ordenes.size(); i++) {
             Orden orden = ordenes.get(i);
+            if (resultados.get(i) == null) {
+                continue;
+            }
             if (resultados.get(i) == Resultado.APLICADO) {
                 cambios.add(orden.idHabitacion() + " → " + orden.accion());
                 estadoFinal.put(orden.idHabitacion(),

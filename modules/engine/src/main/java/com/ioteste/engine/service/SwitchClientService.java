@@ -40,11 +40,17 @@ public class SwitchClientService {
 
     private static final Logger LOG = LoggerFactory.getLogger(SwitchClientService.class);
     /**
-     * Para conectar y para recibir la respuesta. Un switch de la red local contesta en milisegundos (el del
-     * simulador, en menos de uno); uno que no contestó en 1 s se da por fallado y se reintenta en el ciclo
-     * siguiente. Cada segundo de espera es un minuto simulado con ×60 en el que el control no evalúa.
+     * Para recibir la respuesta. Un switch de la red local contesta en milisegundos (el del simulador, en menos de
+     * uno); uno que no contestó en 1 s se da por fallado y se reintenta en el ciclo siguiente. Cada segundo de
+     * espera es un minuto simulado con ×60 en el que el control no evalúa.
      */
-    static final int TIMEOUT_MS = 1000;
+    static final int READ_TIMEOUT_MS = 1000;
+    /**
+     * Para abrir la conexión, más que para la respuesta: si se pierde el primer paquete de conexión (pasa en Wi-Fi),
+     * el reintento sale recién al segundo, y con 1 s se cortaba justo antes. Un switch que no contesta (la falla F05
+     * de {@code ecowarm-run}) acepta la conexión: lo corta el timeout de respuesta.
+     */
+    static final int CONNECT_TIMEOUT_MS = 3000;
 
     /** Cuánto tiempo real se confía en el último estado conocido de un switch antes de volver a consultarlo. */
     static final Duration ESTADO_VIGENTE = Duration.ofSeconds(5);
@@ -79,8 +85,14 @@ public class SwitchClientService {
     }
 
     /**
-     * Estado del switch: el último conocido mientras siga vigente; si no, se consulta. Si la consulta falla, el
-     * estado es {@link EstadoSwitch#DESCONOCIDO} y el controlador lo comandará explícitamente.
+     * Estado del switch: el último conocido mientras siga vigente; si no, se consulta. Si la consulta falla (o la
+     * respuesta no se entiende), el estado es {@link EstadoSwitch#DESCONOCIDO} y el controlador lo comandará
+     * explícitamente.
+     *
+     * <p>Salvo que el último estado conocido fuera {@code ON}: una consulta que falla no cambia el switch, así que se
+     * lo sigue contando encendido (su potencia sigue ocupada) y se vuelve a consultar en el ciclo siguiente. Si no,
+     * con 50 switches por Wi-Fi, un {@code Connect timed out} ocasional hacía apagar una habitación que estaba
+     * calentando para darle su lugar a otra.
      */
     public EstadoSwitch consultarEstado(String urlSwitch, String idSwitch) {
         String base = base(urlSwitch);
@@ -89,6 +101,9 @@ public class SwitchClientService {
             return conocido.estado();
         }
         EstadoSwitch estado = leerEstado(base, idSwitch);
+        if (estado == EstadoSwitch.DESCONOCIDO && conocido != null && conocido.estado() == EstadoSwitch.ON) {
+            return EstadoSwitch.ON; // sigue vencido: se vuelve a consultar en el ciclo siguiente
+        }
         recordar(base, idSwitch, estado);
         return estado;
     }
@@ -191,8 +206,8 @@ public class SwitchClientService {
 
     private static RestTemplate conTimeouts() {
         SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
-        factory.setConnectTimeout(TIMEOUT_MS);
-        factory.setReadTimeout(TIMEOUT_MS);
+        factory.setConnectTimeout(CONNECT_TIMEOUT_MS);
+        factory.setReadTimeout(READ_TIMEOUT_MS);
         return new RestTemplate(factory);
     }
 }

@@ -1,5 +1,6 @@
 package com.ioteste.engine.service;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ioteste.engine.domain.ControladorRegistrado.BrokerMqtt;
 import com.ioteste.engine.domain.Habitacion;
@@ -53,12 +54,21 @@ public class MqttSubscriberService {
     private static final long REINTENTO_MS = 5_000;
     private static final int QOS = 1;
 
+    /**
+     * Rango plausible (°C) de la temperatura de una habitación. Afuera no hay una lectura sino un sensor en falla:
+     * −40 °C y 85 °C son los valores típicos de error de los sensores de temperatura.
+     */
+    static final double TEMPERATURA_MINIMA_C = -10.0;
+    static final double TEMPERATURA_MAXIMA_C = 50.0;
+
     private final HistoricoRepository historico;
     private final SitioRepository sitioRepository;
     private final ObjectMapper objectMapper;
     private final Clock clock;
     private final String brokerConfigurado;
     private final AtomicBoolean conexionIniciada = new AtomicBoolean(false);
+    /** Topics cuyo termostato está mandando mensajes fuera del contrato (para avisar una sola vez). */
+    private final FallasActivas fueraDeContrato = new FallasActivas();
 
     // Estado de la suscripción: se accede solo desde métodos synchronized
     private IMqttAsyncClient conectado;
@@ -231,14 +241,31 @@ public class MqttSubscriberService {
                 .orElse(Set.of());
     }
 
-    /** Guarda la lectura de un mensaje. Nunca lanza: un mensaje inválido no debe cortar la suscripción. */
+    /**
+     * Guarda la lectura de un mensaje. Nunca lanza: un mensaje inválido no debe cortar la suscripción.
+     *
+     * <p>Un mensaje fuera del contrato (§2) no es una lectura: se descarta, y si el termostato no vuelve a mandar
+     * una lectura válida, el fail-safe apaga su habitación como si estuviera callado. Se avisa una vez cuando un
+     * termostato empieza a mandar mal y otra cuando se recupera, no con cada mensaje.
+     */
     void procesar(String topic, byte[] payload) {
+        MensajeTermostato mensaje;
         try {
-            MensajeTermostato mensaje = objectMapper.readValue(payload, MensajeTermostato.class);
-            if (mensaje.tC() == null) {
-                LOG.warn("Mensaje de {} sin tC: se descarta", topic);
-                return;
+            mensaje = interpretar(payload);
+        } catch (FueraDeContrato e) {
+            if (fueraDeContrato.empezo(topic)) {
+                LOG.warn("El termostato {} manda mensajes fuera del contrato ({}): se descartan y, si no vuelve a "
+                        + "mandar lecturas válidas, su habitación se apaga por seguridad", termostato(topic),
+                        e.getMessage());
+            } else {
+                LOG.debug("Mensaje de {} fuera del contrato: {}", topic, e.getMessage());
             }
+            return;
+        }
+        if (fueraDeContrato.termino(topic)) {
+            LOG.info("El termostato {} vuelve a mandar lecturas válidas", termostato(topic));
+        }
+        try {
             Instant recibidaEn = clock.instant();
             Instant medidaEn = mensaje.ts() != null && mensaje.ts() > 0
                     ? Instant.ofEpochMilli(Math.round(mensaje.ts() * 1000))
@@ -248,10 +275,44 @@ public class MqttSubscriberService {
             } else {
                 LOG.debug("El topic {} no corresponde a ninguna habitación", topic);
             }
-        } catch (IOException e) {
-            LOG.warn("Payload inválido en {}: {}", topic, e.getMessage());
         } catch (RuntimeException e) {
             LOG.error("No se pudo registrar la lectura de {}: {}", topic, e.getMessage());
+        }
+    }
+
+    /**
+     * El mensaje del §2: un objeto JSON con {@code tC} numérica y plausible. {@code ts} (epoch en segundos) puede
+     * faltar. Se exige que {@code tC} sea un número JSON: Jackson, por defecto, convertiría {@code "20.0"} sin avisar.
+     */
+    private MensajeTermostato interpretar(byte[] payload) throws FueraDeContrato {
+        JsonNode json;
+        try {
+            json = objectMapper.readTree(payload);
+        } catch (IOException e) {
+            throw new FueraDeContrato("no es JSON");
+        }
+        if (json == null || !json.isObject()) {
+            throw new FueraDeContrato("no es un objeto JSON");
+        }
+        JsonNode tC = json.get("tC");
+        if (tC == null || tC.isNull()) {
+            throw new FueraDeContrato("sin tC");
+        }
+        if (!tC.isNumber()) {
+            throw new FueraDeContrato("tC no es un número: " + tC);
+        }
+        double temperatura = tC.asDouble();
+        if (temperatura < TEMPERATURA_MINIMA_C || temperatura > TEMPERATURA_MAXIMA_C) {
+            throw new FueraDeContrato("tC fuera de rango: " + tC + " °C");
+        }
+        JsonNode ts = json.get("ts");
+        return new MensajeTermostato(temperatura, ts != null && ts.isNumber() ? ts.asDouble() : null);
+    }
+
+    /** Por qué un mensaje no es una lectura válida. */
+    private static final class FueraDeContrato extends Exception {
+        FueraDeContrato(String motivo) {
+            super(motivo, null, false, false);
         }
     }
 

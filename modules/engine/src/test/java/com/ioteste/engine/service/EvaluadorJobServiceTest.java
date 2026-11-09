@@ -340,6 +340,42 @@ class EvaluadorJobServiceTest {
         verify(switchClient).comandarSwitch(URL_SW, "sw-2", "OFF");
     }
 
+    // ---------------------------------------------------------------- detenido en medio de un ciclo (§5.2)
+
+    @Test
+    void unDetenerQueLlegaMientrasSeConsultanLosSwitchesNoDejaSalirOrdenes() {
+        iniciarEn(MARTES_10HS);
+        sitio(10.0, habitacion("1", 22.0, 2.0));
+        lectura("1", 15.0);
+        // El DETENER llega mientras el ciclo espera la respuesta de un switch lento (en F07, uno que tarda 5 s)
+        when(switchClient.consultarEstado(URL_SW, "sw-1")).thenAnswer(pedido -> {
+            motor.detenerMotor();
+            return EstadoSwitch.OFF;
+        });
+
+        motor.ejecutarCicloDeControl();
+
+        verify(switchClient, never()).comandarSwitch(anyString(), anyString(), anyString());
+    }
+
+    @Test
+    void unDetenerQueLlegaMientrasSalenLosApagadosNoDejaSalirLosEncendidos() {
+        iniciarEn(MARTES_10HS);
+        sitio(4.0, habitacion("1", 20.0, 2.0), habitacion("2", 22.0, 2.0));
+        lectura("1", 25.0);
+        lectura("2", 15.0);
+        when(switchClient.consultarEstado(URL_SW, "sw-1")).thenReturn(EstadoSwitch.ON);
+        when(switchClient.consultarEstado(URL_SW, "sw-2")).thenReturn(EstadoSwitch.OFF);
+        when(switchClient.comandarSwitch(URL_SW, "sw-1", "OFF")).thenAnswer(pedido -> {
+            motor.detenerMotor();
+            return Resultado.APLICADO;
+        });
+
+        motor.ejecutarCicloDeControl();
+
+        verify(switchClient, never()).comandarSwitch(URL_SW, "sw-2", "ON");
+    }
+
     // ---------------------------------------------------------------- switches a la vez
 
     @Test

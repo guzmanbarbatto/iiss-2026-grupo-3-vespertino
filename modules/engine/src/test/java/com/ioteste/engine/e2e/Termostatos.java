@@ -26,6 +26,8 @@ final class Termostatos implements AutoCloseable {
     private final ScheduledExecutorService hilo = Executors.newSingleThreadScheduledExecutor();
     /** Temperatura que publica cada topic. Un topic ausente es un termostato callado. */
     private final Map<String, Double> temperaturas = new ConcurrentHashMap<>();
+    /** Mensaje tal cual que publica un termostato fuera del contrato, en lugar de su temperatura. */
+    private final Map<String, String> crudos = new ConcurrentHashMap<>();
 
     Termostatos(String brokerUrl) throws MqttException {
         cliente = new MqttClient(brokerUrl, "termostatos-e2e", new MemoryPersistence());
@@ -38,23 +40,34 @@ final class Termostatos implements AutoCloseable {
     }
 
     void medir(String topic, double temperaturaC) {
+        crudos.remove(topic);
         temperaturas.put(topic, temperaturaC);
+    }
+
+    /** El termostato publica {@code payload} tal cual (por ejemplo, fuera del contrato) hasta que vuelva a medir. */
+    void publicarTalCual(String topic, String payload) {
+        temperaturas.remove(topic);
+        crudos.put(topic, payload);
     }
 
     void callar(String topic) {
         temperaturas.remove(topic);
+        crudos.remove(topic);
     }
 
     private void publicar() {
-        temperaturas.forEach((topic, temperaturaC) -> {
-            String payload = String.format(Locale.ROOT, "{\"id\":0,\"tC\":%.1f,\"tF\":%.1f,\"ts\":%.3f}",
-                    temperaturaC, temperaturaC * 9 / 5 + 32, System.currentTimeMillis() / 1000.0);
-            try {
-                cliente.publish(topic, payload.getBytes(StandardCharsets.UTF_8), 0, false);
-            } catch (MqttException | RuntimeException e) {
-                // Broker caído o reconectando: se vuelve a publicar en el próximo período
-            }
-        });
+        temperaturas.forEach((topic, temperaturaC) -> enviar(topic, String.format(Locale.ROOT,
+                "{\"id\":0,\"tC\":%.1f,\"tF\":%.1f,\"ts\":%.3f}",
+                temperaturaC, temperaturaC * 9 / 5 + 32, System.currentTimeMillis() / 1000.0)));
+        crudos.forEach(this::enviar);
+    }
+
+    private void enviar(String topic, String payload) {
+        try {
+            cliente.publish(topic, payload.getBytes(StandardCharsets.UTF_8), 0, false);
+        } catch (MqttException | RuntimeException e) {
+            // Broker caído o reconectando: se vuelve a publicar en el próximo período
+        }
     }
 
     @Override
