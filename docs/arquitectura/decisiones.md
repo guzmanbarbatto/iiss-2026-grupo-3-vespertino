@@ -2,7 +2,7 @@
 
 Las decisiones que dieron forma a EcoWarm: qué se decidió, por qué, qué alternativas se descartaron y qué consecuencias tiene. Varias de las más recientes salieron de validar el controlador contra el simulador de la cátedra: el runner `ecowarm-run` y las corridas del profesor del 4/11.
 
-Cada decisión indica cuándo se tomó (iteración y PR) y si sigue vigente. Las que se revirtieron están al final, con el motivo. La arquitectura resultante está en [`4mas1.md`](4mas1.md).
+Cada decisión indica cuándo se tomó (iteración y PR) y si sigue vigente. Las que se revirtieron están al final, con el motivo. La arquitectura resultante está en [`4mas1.md`](4mas1.md), y las limitaciones que dejan estas decisiones, con lo que conviene hacer después, en [`roadmap.md`](roadmap.md).
 
 | # | Decisión | Cuándo |
 |---|---|---|
