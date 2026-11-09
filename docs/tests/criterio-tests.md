@@ -1,6 +1,6 @@
 # Criterios de Adecuación del Conjunto de Tests
 
-Este documento detalla el diseño y los criterios de los tests del proyecto: las reglas del `core` (sección 2), el `engine` (sección 3), el test de punta a punta (sección 4) y la integración continua (sección 5). Los tests del servidor MCP están en [`docs/mcp/pruebas-mcp.md`](../mcp/pruebas-mcp.md).
+Este documento detalla el diseño y los criterios de los tests del proyecto: las reglas del `core` (sección 2), el `engine` (sección 3), el test de punta a punta (sección 4), la integración continua (sección 5) y la evidencia final (sección 6). Los tests del servidor MCP están en [`docs/mcp/pruebas-mcp.md`](../mcp/pruebas-mcp.md).
 
 ## 1. Estrategia y Técnicas Aplicadas
 El conjunto de tests fue diseñado utilizando técnicas de **Pruebas de Caja Negra**, enfocándose en los requisitos funcionales del controlador: las reglas de control y el estándar `interop-v2`. Las técnicas principales utilizadas fueron:
@@ -112,3 +112,6 @@ El engine se configura como en producción: el broker no se le indica, lo toma d
 El workflow [`.github/workflows/maven.yml`](../../.github/workflows/maven.yml) corre en cada pull request y en cada push a `main`, con dos jobs:
 *   **`tests`:** `mvn verify` directamente en el runner de GitHub, que tiene Docker. Corren los 234 tests (incluidos los que usan PostgreSQL y Mosquitto reales), Checkstyle y el umbral de cobertura del `core`. Después **falla si algún test se omitió**: sin Docker, los tests con Testcontainers se omiten en silencio y el build quedaría en verde sin haberlos corrido. Si algo falla, los reportes de Surefire quedan como artefacto del job durante 7 días.
 *   **`build-and-verify`:** construye las imágenes Docker (`scripts/build.sh`), lo mismo que se despliega.
+
+## 6. Evidencia final
+La corrida final de la Iteración 6 está en [`evidencia-final/`](evidencia-final/README.md): `mvn clean verify` (234 tests), los 9 escenarios de `ecowarm-run` (62 de 62 expectativas) y el checker `ecowarm-check` (8 de 8), con los reportes completos.

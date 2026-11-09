@@ -1,0 +1,34 @@
+# mvn -B -ntp clean verify — 2026-11-09 14:25 (resumen del log)
+
+Building core 1.0-SNAPSHOT                                         [2/4]
+You have 0 Checkstyle violations.
+Tests run: 37, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.289 s -- in com.ioteste.core.service.EvaluadorCoreTest
+Tests run: 37, Failures: 0, Errors: 0, Skipped: 0
+All coverage checks have been met.
+Building engine 1.0-SNAPSHOT                                       [3/4]
+You have 0 Checkstyle violations.
+Tests run: 16, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 6.370 s -- in com.ioteste.engine.controller.ApiRestTest
+Tests run: 22, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 172.5 s -- in com.ioteste.engine.e2e.PuntaAPuntaTest
+Tests run: 15, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 2.901 s -- in com.ioteste.engine.repository.RepositoriosPostgresTest
+Tests run: 47, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.542 s -- in com.ioteste.engine.service.EvaluadorJobServiceTest
+Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.003 s -- in com.ioteste.engine.service.FallasActivasTest
+Tests run: 15, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.193 s -- in com.ioteste.engine.service.MqttSubscriberServiceTest
+Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.006 s -- in com.ioteste.engine.service.RelojControlTest
+Tests run: 10, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.119 s -- in com.ioteste.engine.service.SimuladorRegistroServiceTest
+Tests run: 19, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 2.075 s -- in com.ioteste.engine.service.SwitchClientServiceTest
+Tests run: 14, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.016 s -- in com.ioteste.engine.service.ValidadorInventarioTest
+Tests run: 165, Failures: 0, Errors: 0, Skipped: 0
+Building EcoWarm MCP Server 1.0-SNAPSHOT                           [4/4]
+You have 0 Checkstyle violations.
+Tests run: 11, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.645 s -- in com.ioteste.mcp.client.ClientesHttpTest
+Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 3.687 s -- in com.ioteste.mcp.McpServerContextTest
+Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 3.756 s -- in com.ioteste.mcp.repository.TemperaturaRepositoryTest
+Tests run: 13, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.391 s -- in com.ioteste.mcp.tools.EcoWarmToolsTest
+Tests run: 32, Failures: 0, Errors: 0, Skipped: 0
+Reactor Summary for ioteste-domotica 1.0-SNAPSHOT:
+ioteste-domotica ................................... SUCCESS [  0.251 s]
+core ............................................... SUCCESS [ 12.981 s]
+engine ............................................. SUCCESS [03:21 min]
+EcoWarm MCP Server ................................. SUCCESS [ 16.310 s]
+BUILD SUCCESS
+Total time:  03:51 min
