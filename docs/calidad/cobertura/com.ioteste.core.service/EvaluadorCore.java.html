@@ -7,13 +7,16 @@ import com.ioteste.core.domain.Orden;
 import com.ioteste.core.domain.Salida;
 import com.ioteste.core.domain.TarifaPunta;
 
+import java.time.Duration;
 import java.time.LocalTime;
 import java.time.ZonedDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
-<span class="fc" id="L16">public class EvaluadorCore {</span>
+<span class="fc" id="L19">public class EvaluadorCore {</span>
 
     /**
      * Margen (°C) por encima de la temperatura esperada a partir del cual se apaga una habitación encendida.
@@ -22,100 +25,239 @@ import java.util.List;
      */
     public static final double HISTERESIS_C = 0.5;
 
+    /** Tolerancia de redondeo al comparar potencias: con {@code double}, 1,1 + 2,2 da 3,3000000000000003. */
+    private static final double TOLERANCIA_KW = 1e-9;
+
     /**
-     * Calcula las órdenes del ciclo. Las de apagado van siempre antes que las de encendido, para que la
-     * potencia se libere antes de volver a ocuparla.
+     * Con más habitaciones con frío que esto, solo se combinan las de más prioridad (2^16 combinaciones como
+     * mucho, y la búsqueda corta antes casi siempre); las demás se suman después, si entran.
      */
+    static final int MAX_A_COMBINAR = 16;
+
+    /** Primero la habitación más lejos de su objetivo; entre iguales, el orden del inventario. */
+<span class="fc" id="L38">    private static final Comparator&lt;HabitacionDTO&gt; POR_PRIORIDAD =</span>
+<span class="fc" id="L39">            Comparator.comparingDouble(EvaluadorCore::falta).reversed();</span>
+
+    /** Las órdenes del ciclo sin anticipar la tarifa punta (ver la variante con {@code anticipacion}). */
     public Salida evaluarEstado(
             ZonedDateTime fechaHora,
             double potenciaContratadaKW,
             TarifaPunta tarifa,
             List&lt;HabitacionDTO&gt; habitaciones) {
+<span class="fc" id="L47">        return evaluarEstado(fechaHora, Duration.ZERO, potenciaContratadaKW, tarifa, habitaciones);</span>
+    }
 
-<span class="fc" id="L35">        List&lt;Orden&gt; apagar = new ArrayList&lt;&gt;();</span>
-<span class="fc" id="L36">        List&lt;Orden&gt; encender = new ArrayList&lt;&gt;();</span>
+    /**
+     * Calcula las órdenes del ciclo. Las de apagado van siempre antes que las de encendido, para que la
+     * potencia se libere antes de volver a ocuparla.
+     *
+     * @param anticipacion cuánto puede faltar para la próxima evaluación. Si la tarifa punta empieza antes, se
+     *     apaga ya: esperar a la evaluación siguiente dejaría calefactores encendidos dentro de la franja.
+     */
+    public Salida evaluarEstado(
+            ZonedDateTime fechaHora,
+            Duration anticipacion,
+            double potenciaContratadaKW,
+            TarifaPunta tarifa,
+            List&lt;HabitacionDTO&gt; habitaciones) {
 
-<span class="fc bfc" id="L38" title="All 2 branches covered.">        if (enTarifaPunta(fechaHora, tarifa)) {</span>
-            // REGLA 1: en tarifa punta se apaga todo lo que esté (o pueda estar) encendido
-<span class="fc bfc" id="L40" title="All 2 branches covered.">            for (HabitacionDTO hab : habitaciones) {</span>
-<span class="pc bpc" id="L41" title="1 of 2 branches missed.">                if (hab.estadoActual() != EstadoSwitch.OFF) {</span>
-<span class="fc" id="L42">                    apagar.add(new Orden(hab.id(), AccionSwitch.OFF));</span>
+<span class="fc" id="L64">        List&lt;Orden&gt; apagar = new ArrayList&lt;&gt;();</span>
+<span class="fc" id="L65">        List&lt;Orden&gt; encender = new ArrayList&lt;&gt;();</span>
+
+<span class="fc bfc" id="L67" title="All 4 branches covered.">        if (enTarifaPunta(fechaHora, tarifa) || enTarifaPunta(fechaHora.plus(anticipacion), tarifa)) {</span>
+            // REGLA 1: en tarifa punta (o si empieza antes de la próxima evaluación) se apaga todo lo que esté
+            // (o pueda estar) encendido
+<span class="fc bfc" id="L70" title="All 2 branches covered.">            for (HabitacionDTO hab : habitaciones) {</span>
+<span class="fc bfc" id="L71" title="All 2 branches covered.">                if (hab.estadoActual() != EstadoSwitch.OFF) {</span>
+<span class="fc" id="L72">                    apagar.add(new Orden(hab.id(), AccionSwitch.OFF));</span>
                 }
-<span class="fc" id="L44">            }</span>
-<span class="fc" id="L45">            return new Salida(apagar);</span>
+<span class="fc" id="L74">            }</span>
+<span class="fc" id="L75">            return new Salida(apagar);</span>
         }
 
-<span class="fc" id="L48">        double potenciaEnUso = 0.0;</span>
-<span class="fc" id="L49">        List&lt;HabitacionDTO&gt; conFrio = new ArrayList&lt;&gt;();</span>
+<span class="fc" id="L78">        double potenciaEnUso = 0.0;</span>
+<span class="fc" id="L79">        List&lt;HabitacionDTO&gt; encendidas = new ArrayList&lt;&gt;();</span>
+<span class="fc" id="L80">        List&lt;HabitacionDTO&gt; conFrio = new ArrayList&lt;&gt;();</span>
 
-<span class="fc bfc" id="L51" title="All 2 branches covered.">        for (HabitacionDTO hab : habitaciones) {</span>
-<span class="fc bfc" id="L52" title="All 2 branches covered.">            boolean necesitaCalor = hab.temperaturaActual() &lt; hab.temperaturaEsperada();</span>
-<span class="fc bfc" id="L53" title="All 2 branches covered.">            boolean superoObjetivo = hab.temperaturaActual() &gt;= hab.temperaturaEsperada() + HISTERESIS_C;</span>
+<span class="fc bfc" id="L82" title="All 2 branches covered.">        for (HabitacionDTO hab : habitaciones) {</span>
+<span class="fc bfc" id="L83" title="All 2 branches covered.">            boolean necesitaCalor = hab.temperaturaActual() &lt; hab.temperaturaEsperada();</span>
+<span class="fc bfc" id="L84" title="All 2 branches covered.">            boolean superoObjetivo = hab.temperaturaActual() &gt;= hab.temperaturaEsperada() + HISTERESIS_C;</span>
 
-<span class="pc bpc" id="L55" title="1 of 4 branches missed.">            switch (hab.estadoActual()) {</span>
+<span class="pc bpc" id="L86" title="1 of 4 branches missed.">            switch (hab.estadoActual()) {</span>
                 case ON -&gt; {
-<span class="fc bfc" id="L57" title="All 2 branches covered.">                    if (superoObjetivo) {</span>
+<span class="fc bfc" id="L88" title="All 2 branches covered.">                    if (superoObjetivo) {</span>
                         // REGLA 2: ya superó la temperatura esperada (más el margen): apagar y liberar potencia
-<span class="fc" id="L59">                        apagar.add(new Orden(hab.id(), AccionSwitch.OFF));</span>
+<span class="fc" id="L90">                        apagar.add(new Orden(hab.id(), AccionSwitch.OFF));</span>
                     } else {
-<span class="fc" id="L61">                        potenciaEnUso += hab.potenciaKW();</span>
+<span class="fc" id="L92">                        potenciaEnUso += hab.potenciaKW();</span>
+<span class="fc" id="L93">                        encendidas.add(hab);</span>
                     }
-<span class="fc" id="L63">                }</span>
+<span class="fc" id="L95">                }</span>
                 case OFF -&gt; {
-<span class="fc bfc" id="L65" title="All 2 branches covered.">                    if (necesitaCalor) {</span>
-<span class="fc" id="L66">                        conFrio.add(hab);</span>
+<span class="fc bfc" id="L97" title="All 2 branches covered.">                    if (necesitaCalor) {</span>
+<span class="fc" id="L98">                        conFrio.add(hab);</span>
                     }
                 }
                 case DESCONOCIDO -&gt; {
                     // Sin estado confiable se comanda siempre, para que el estado quede conocido
-<span class="fc bfc" id="L71" title="All 2 branches covered.">                    if (necesitaCalor) {</span>
-<span class="fc" id="L72">                        conFrio.add(hab);</span>
+<span class="fc bfc" id="L103" title="All 2 branches covered.">                    if (necesitaCalor) {</span>
+<span class="fc" id="L104">                        conFrio.add(hab);</span>
                     } else {
-<span class="fc" id="L74">                        apagar.add(new Orden(hab.id(), AccionSwitch.OFF));</span>
+<span class="fc" id="L106">                        apagar.add(new Orden(hab.id(), AccionSwitch.OFF));</span>
                     }
                 }
             }
-<span class="fc" id="L78">        }</span>
+<span class="fc" id="L110">        }</span>
 
-        // REGLA 3: encender las que tienen frío, primero la que está más lejos de su objetivo,
-        // solo si la potencia contratada lo soporta
-<span class="fc" id="L82">        conFrio.sort(Comparator.comparingDouble(</span>
-<span class="fc" id="L83">                (HabitacionDTO h) -&gt; h.temperaturaEsperada() - h.temperaturaActual()).reversed());</span>
+        // REGLA 3: si lo encendido ya no entra en la contratada (por ejemplo, porque bajó con un PUT /sitio en
+        // caliente), siguen encendidas las que más la aprovechan (entre combinaciones iguales, las más lejos de su
+        // objetivo) y se apaga el resto, empezando por la más cerca de su objetivo
+<span class="fc bfc" id="L115" title="All 2 branches covered.">        if (potenciaEnUso &gt; potenciaContratadaKW + TOLERANCIA_KW) {</span>
+<span class="fc" id="L116">            encendidas.sort(POR_PRIORIDAD);</span>
+<span class="fc" id="L117">            Set&lt;String&gt; siguen = ids(mejorCombinacion(encendidas, potenciaContratadaKW));</span>
+<span class="fc" id="L118">            List&lt;HabitacionDTO&gt; sobran = new ArrayList&lt;&gt;();</span>
+<span class="fc" id="L119">            potenciaEnUso = 0.0;</span>
+<span class="fc bfc" id="L120" title="All 2 branches covered.">            for (HabitacionDTO hab : encendidas) {</span>
+<span class="fc bfc" id="L121" title="All 2 branches covered.">                if (siguen.contains(hab.id())) {</span>
+<span class="fc" id="L122">                    potenciaEnUso += hab.potenciaKW();</span>
+                } else {
+<span class="fc" id="L124">                    sobran.add(hab);</span>
+                }
+<span class="fc" id="L126">            }</span>
+<span class="fc" id="L127">            sobran.sort(Comparator.comparingDouble(EvaluadorCore::falta));</span>
+<span class="fc" id="L128">            sobran.forEach(hab -&gt; apagar.add(new Orden(hab.id(), AccionSwitch.OFF)));</span>
+        }
 
-<span class="fc bfc" id="L85" title="All 2 branches covered.">        for (HabitacionDTO hab : conFrio) {</span>
-<span class="fc bfc" id="L86" title="All 2 branches covered.">            if (potenciaEnUso + hab.potenciaKW() &lt;= potenciaContratadaKW) {</span>
-<span class="fc" id="L87">                encender.add(new Orden(hab.id(), AccionSwitch.ON));</span>
-<span class="fc" id="L88">                potenciaEnUso += hab.potenciaKW();</span>
-<span class="fc bfc" id="L89" title="All 2 branches covered.">            } else if (hab.estadoActual() == EstadoSwitch.DESCONOCIDO) {</span>
+        // REGLA 4: con la potencia libre, encender la combinación de habitaciones con frío que más la aprovecha;
+        // entre combinaciones iguales, la que incluye a las más lejos de su objetivo. Las órdenes salen en ese
+        // orden de prioridad
+<span class="fc" id="L134">        conFrio.sort(POR_PRIORIDAD);</span>
+<span class="fc" id="L135">        Set&lt;String&gt; aEncender = ids(mejorCombinacion(conFrio, potenciaContratadaKW - potenciaEnUso));</span>
+
+<span class="fc bfc" id="L137" title="All 2 branches covered.">        for (HabitacionDTO hab : conFrio) {</span>
+<span class="fc bfc" id="L138" title="All 2 branches covered.">            if (aEncender.contains(hab.id())) {</span>
+<span class="fc" id="L139">                encender.add(new Orden(hab.id(), AccionSwitch.ON));</span>
+<span class="fc bfc" id="L140" title="All 2 branches covered.">            } else if (hab.estadoActual() == EstadoSwitch.DESCONOCIDO) {</span>
                 // No entra en la potencia y podría estar encendido: se apaga para no superar el tope
-<span class="fc" id="L91">                apagar.add(new Orden(hab.id(), AccionSwitch.OFF));</span>
+<span class="fc" id="L142">                apagar.add(new Orden(hab.id(), AccionSwitch.OFF));</span>
             }
-<span class="fc" id="L93">        }</span>
+<span class="fc" id="L144">        }</span>
 
-<span class="fc" id="L95">        List&lt;Orden&gt; ordenes = new ArrayList&lt;&gt;(apagar);</span>
-<span class="fc" id="L96">        ordenes.addAll(encender);</span>
-<span class="fc" id="L97">        return new Salida(ordenes);</span>
+<span class="fc" id="L146">        List&lt;Orden&gt; ordenes = new ArrayList&lt;&gt;(apagar);</span>
+<span class="fc" id="L147">        ordenes.addAll(encender);</span>
+<span class="fc" id="L148">        return new Salida(ordenes);</span>
+    }
+
+    /**
+     * De {@code candidatas}, ordenadas de mayor a menor prioridad, las que suman más potencia sin pasar de
+     * {@code libreKW}. Entre combinaciones que suman lo mismo, la que incluye a las de más prioridad.
+     *
+     * &lt;p&gt;Tomarlas una por una, por prioridad, puede dejar potencia sin usar: con 2 kW libres y habitaciones
+     * empatadas de 1,2, 0,9, 0,9 y 1,0 kW, la de 1,2 sola deja 0,8 kW donde no entra ninguna otra; la de 0,9 con
+     * la de 1,0 usan 1,9. Se prueban las combinaciones de las {@link #MAX_A_COMBINAR} de más prioridad; si hay
+     * más, las restantes se suman después, una por una, si entran.
+     */
+    static List&lt;HabitacionDTO&gt; mejorCombinacion(List&lt;HabitacionDTO&gt; candidatas, double libreKW) {
+<span class="fc" id="L161">        List&lt;HabitacionDTO&gt; combinables = candidatas.subList(0, Math.min(candidatas.size(), MAX_A_COMBINAR));</span>
+<span class="fc" id="L162">        List&lt;HabitacionDTO&gt; elegidas = new BusquedaDeCombinacion(combinables, libreKW).mejor();</span>
+<span class="fc" id="L163">        double usada = elegidas.stream().mapToDouble(HabitacionDTO::potenciaKW).sum();</span>
+<span class="fc bfc" id="L164" title="All 2 branches covered.">        for (HabitacionDTO hab : candidatas.subList(combinables.size(), candidatas.size())) {</span>
+<span class="fc bfc" id="L165" title="All 2 branches covered.">            if (usada + hab.potenciaKW() &lt;= libreKW + TOLERANCIA_KW) {</span>
+<span class="fc" id="L166">                elegidas.add(hab);</span>
+<span class="fc" id="L167">                usada += hab.potenciaKW();</span>
+            }
+<span class="fc" id="L169">        }</span>
+<span class="fc" id="L170">        return elegidas;</span>
+    }
+
+    /**
+     * Recorre las combinaciones en profundidad, probando cada habitación primero incluida y después no: así, entre
+     * las que suman lo mismo, la primera que encuentra es la que incluye a las de más prioridad. Corta las ramas
+     * que no pueden superar a la mejor encontrada y termina si alguna ya llena lo libre.
+     */
+    private static final class BusquedaDeCombinacion {
+        private final List&lt;HabitacionDTO&gt; candidatas;
+        private final double libreKW;
+        /** {@code restante[i]}: lo que suman las candidatas desde la {@code i} en adelante. */
+        private final double[] restante;
+        private final boolean[] actual;
+        private boolean[] mejor;
+<span class="fc" id="L185">        private double mejorSuma = -1;</span>
+
+<span class="fc" id="L187">        BusquedaDeCombinacion(List&lt;HabitacionDTO&gt; candidatas, double libreKW) {</span>
+<span class="fc" id="L188">            this.candidatas = candidatas;</span>
+<span class="fc" id="L189">            this.libreKW = libreKW;</span>
+<span class="fc" id="L190">            int n = candidatas.size();</span>
+<span class="fc" id="L191">            restante = new double[n + 1];</span>
+<span class="fc bfc" id="L192" title="All 2 branches covered.">            for (int i = n - 1; i &gt;= 0; i--) {</span>
+<span class="fc" id="L193">                restante[i] = restante[i + 1] + candidatas.get(i).potenciaKW();</span>
+            }
+<span class="fc" id="L195">            actual = new boolean[n];</span>
+<span class="fc" id="L196">            mejor = new boolean[n];</span>
+<span class="fc" id="L197">        }</span>
+
+        List&lt;HabitacionDTO&gt; mejor() {
+<span class="fc" id="L200">            buscar(0, 0.0);</span>
+<span class="fc" id="L201">            List&lt;HabitacionDTO&gt; elegidas = new ArrayList&lt;&gt;();</span>
+<span class="fc bfc" id="L202" title="All 2 branches covered.">            for (int i = 0; i &lt; mejor.length; i++) {</span>
+<span class="fc bfc" id="L203" title="All 2 branches covered.">                if (mejor[i]) {</span>
+<span class="fc" id="L204">                    elegidas.add(candidatas.get(i));</span>
+                }
+            }
+<span class="fc" id="L207">            return elegidas;</span>
+        }
+
+        private void buscar(int i, double suma) {
+<span class="fc bfc" id="L211" title="All 2 branches covered.">            if (i == candidatas.size()) {</span>
+<span class="fc bfc" id="L212" title="All 2 branches covered.">                if (suma &gt; mejorSuma + TOLERANCIA_KW) {</span>
+<span class="fc" id="L213">                    mejorSuma = suma;</span>
+<span class="fc" id="L214">                    mejor = actual.clone();</span>
+                }
+<span class="fc" id="L216">                return;</span>
+            }
+<span class="pc bpc" id="L218" title="1 of 4 branches missed.">            if (suma + restante[i] &lt;= mejorSuma + TOLERANCIA_KW || mejorSuma &gt;= libreKW - TOLERANCIA_KW) {</span>
+<span class="fc" id="L219">                return; // esta rama no puede superar a la mejor, o la mejor ya llena lo libre</span>
+            }
+<span class="fc" id="L221">            double potencia = candidatas.get(i).potenciaKW();</span>
+<span class="fc bfc" id="L222" title="All 2 branches covered.">            if (suma + potencia &lt;= libreKW + TOLERANCIA_KW) {</span>
+<span class="fc" id="L223">                actual[i] = true;</span>
+<span class="fc" id="L224">                buscar(i + 1, suma + potencia);</span>
+<span class="fc" id="L225">                actual[i] = false;</span>
+            }
+<span class="fc" id="L227">            buscar(i + 1, suma);</span>
+<span class="fc" id="L228">        }</span>
+    }
+
+    /** Cuántos grados le faltan para llegar a su objetivo (negativo si ya lo pasó). */
+    private static double falta(HabitacionDTO hab) {
+<span class="fc" id="L233">        return hab.temperaturaEsperada() - hab.temperaturaActual();</span>
+    }
+
+    private static Set&lt;String&gt; ids(List&lt;HabitacionDTO&gt; habitaciones) {
+<span class="fc" id="L237">        Set&lt;String&gt; ids = new HashSet&lt;&gt;();</span>
+<span class="fc" id="L238">        habitaciones.forEach(hab -&gt; ids.add(hab.id()));</span>
+<span class="fc" id="L239">        return ids;</span>
     }
 
     private boolean enTarifaPunta(ZonedDateTime fechaHora, TarifaPunta tarifa) {
-<span class="fc bfc" id="L101" title="All 2 branches covered.">        if (!tarifa.dias().contains(fechaHora.getDayOfWeek())) {</span>
-<span class="fc" id="L102">            return false;</span>
+<span class="fc bfc" id="L243" title="All 2 branches covered.">        if (!tarifa.dias().contains(fechaHora.getDayOfWeek())) {</span>
+<span class="fc" id="L244">            return false;</span>
         }
 
-<span class="fc" id="L105">        LocalTime horaActual = fechaHora.toLocalTime();</span>
+<span class="fc" id="L247">        LocalTime horaActual = fechaHora.toLocalTime();</span>
 
         // Si desde == hasta, la franja es vacía
-<span class="fc bfc" id="L108" title="All 2 branches covered.">        if (tarifa.desde().equals(tarifa.hasta())) {</span>
-<span class="fc" id="L109">            return false;</span>
+<span class="fc bfc" id="L250" title="All 2 branches covered.">        if (tarifa.desde().equals(tarifa.hasta())) {</span>
+<span class="fc" id="L251">            return false;</span>
         }
 
         // Rango normal en el mismo día [desde, hasta) (ej. 17:00 a 23:00)
-<span class="fc bfc" id="L113" title="All 2 branches covered.">        if (tarifa.desde().isBefore(tarifa.hasta())) {</span>
-<span class="fc bfc" id="L114" title="All 4 branches covered.">            return !horaActual.isBefore(tarifa.desde()) &amp;&amp; horaActual.isBefore(tarifa.hasta());</span>
+<span class="fc bfc" id="L255" title="All 2 branches covered.">        if (tarifa.desde().isBefore(tarifa.hasta())) {</span>
+<span class="fc bfc" id="L256" title="All 4 branches covered.">            return !horaActual.isBefore(tarifa.desde()) &amp;&amp; horaActual.isBefore(tarifa.hasta());</span>
         }
 
         // Rango nocturno que cruza medianoche (ej. 22:00 a 06:00)
-<span class="pc bpc" id="L118" title="3 of 4 branches missed.">        return !horaActual.isBefore(tarifa.desde()) || horaActual.isBefore(tarifa.hasta());</span>
+<span class="pc bpc" id="L260" title="3 of 4 branches missed.">        return !horaActual.isBefore(tarifa.desde()) || horaActual.isBefore(tarifa.hasta());</span>
     }
 }
 </pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.15.202606040825</span></div></body></html>

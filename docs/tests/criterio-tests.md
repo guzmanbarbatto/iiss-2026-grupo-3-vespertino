@@ -1,9 +1,9 @@
 # Criterios de Adecuación del Conjunto de Tests
 
-Este documento detalla el diseño y los criterios de cobertura aplicados para las pruebas unitarias del módulo `core` (`EvaluadorCoreTest.java`), asegurando el correcto funcionamiento de las reglas de negocio críticas bajo una arquitectura guiada por el dominio.
+Este documento detalla el diseño y los criterios de los tests del proyecto: las reglas del `core` (sección 2), el `engine` (sección 3), el test de punta a punta (sección 4) y la integración continua (sección 5). Los tests del servidor MCP están en [`docs/mcp/pruebas-mcp.md`](../mcp/pruebas-mcp.md).
 
 ## 1. Estrategia y Técnicas Aplicadas
-El conjunto de tests fue diseñado utilizando técnicas de **Pruebas de Caja Negra**, enfocándose en los requisitos funcionales establecidos para la Iteración 4. Las técnicas principales utilizadas fueron:
+El conjunto de tests fue diseñado utilizando técnicas de **Pruebas de Caja Negra**, enfocándose en los requisitos funcionales del controlador: las reglas de control y el estándar `interop-v2`. Las técnicas principales utilizadas fueron:
 *   **Partición de Equivalencia:** Para agrupar entradas válidas (ej. días hábiles vs. fines de semana, temperaturas altas vs. bajas).
 *   **Análisis de Valores Límite:** Para probar el comportamiento del sistema exactamente en los bordes horarios de la tarifa punta y en los umbrales de potencia contratada.
 
@@ -16,15 +16,15 @@ Se verificó que el sistema priorice el ahorro energético apagando todos los di
     *   *Límite Inferior Inclusivo:* Se evaluó el sistema exactamente a las `17:00:00`. El test garantiza que el corte se activa de forma inmediata en el segundo inicial.
     *   *Límite Superior Exclusivo:* Se evaluó el sistema exactamente a las `23:00:00`. El test verifica que la restricción se levanta, permitiendo encender equipos nuevamente.
 
-### B. Reglas 2 y 3: Control de Temperatura e Idempotencia
+### B. Control de Temperatura e Idempotencia
 Fuera del horario de tarifa punta, el sistema actúa como un termostato inteligente.
-*   **Decisión de Estado:** Se agregaron pruebas para corroborar que una habitación se encienda si su temperatura actual es menor a la esperada, y se apague en cuanto la alcance o supere.
-*   **Idempotencia (Casos Borde de Red):** Para evitar saturar el broker MQTT y la red, se agregaron casos específicos que validan que el sistema **no emita órdenes redundantes**. Si una habitación ya está `ON` y necesita calor, el `core` no envía otro comando `ON`. Si está `OFF` y ya alcanzó la temperatura, no envía otro `OFF`.
+*   **Decisión de Estado:** Se agregaron pruebas para corroborar que una habitación se encienda si su temperatura actual es menor a la esperada, y se apague recién al superarla por el margen de histéresis (ver E).
+*   **Idempotencia (Casos Borde de Red):** Para no mandarles comandos de más a los switches (que se comandan por HTTP), se agregaron casos específicos que validan que el sistema **no emita órdenes redundantes**. Si una habitación ya está `ON` y necesita calor, el `core` no envía otro comando `ON`. Si está `OFF` y ya alcanzó la temperatura, no envía otro `OFF`.
 
 ### C. Restricción Física: Límite de Potencia Eléctrica
 Se implementó cobertura para proteger la instalación eléctrica general (llave térmica), asegurando que la sumatoria de potencias (kW) de las habitaciones encendidas nunca supere la potencia contratada del sitio.
 *   **Partición de Superación Directa:** Un test evalúa el escenario donde dos habitaciones necesitan encenderse, pero la suma de ambas supera el límite. El sistema debe denegar el encendido de la segunda habitación.
-*   **Caso Borde de Encendido Parcial:** Se evalúa un escenario con múltiples habitaciones en cola para encenderse. El sistema debe sumar iterativamente la carga y encender tantas habitaciones como sea posible matemáticamente, descartando únicamente aquella unidad que provoque el desbordamiento de la potencia máxima permitida.
+*   **Caso Borde de Encendido Parcial:** Se evalúa un escenario con múltiples habitaciones en cola para encenderse. El sistema enciende las que entran en la potencia contratada, eligiendo la combinación que más la aprovecha (ver I), sin superar nunca el límite.
 
 ### D. Switch en estado desconocido
 El simulador informa `DESCONOCIDO` mientras nadie accionó un relé, y el engine usa el mismo estado cuando no pudo consultar el switch. El `core` no supone nada: lo comanda explícitamente.
@@ -53,7 +53,7 @@ Encender una por una, por prioridad, puede dejar potencia sin usar (el escenario
 *   **Con algo ya encendido:** la potencia que queda libre se llena con la combinación que mejor entra, aunque deje afuera a una habitación con más frío que sola aprovecharía menos.
 *   **Muchas habitaciones:** se combinan las 16 de más prioridad (`MAX_A_COMBINAR`); las demás se suman después, si entran.
 
-## 3. Tests del módulo `engine` (Iteración 5)
+## 3. Tests del módulo `engine`
 El `engine` se prueba en capas, con el tiempo fijado por un reloj inyectable para que cada caso sepa si está dentro o fuera de la tarifa punta:
 *   **`EvaluadorJobServiceTest`:** el ciclo de control completo con repositorios y switches simulados. Cubre reglas fuera de punta, límite de potencia, tarifa punta (también con reloj acelerado), fail-safe de termostatos (sin lecturas o vencidas, también con aceleración x600, donde el límite de 3 lecturas perdidas al ritmo de cada termostato evita apagados falsos, incluso con termostatos que publican más lento), que el estado del switch se relea en cada ciclo (un cambio externo se corrige), que una falla al consultar o comandar un switch no envenene ciclos siguientes ni frene a los demás, que un `OFF` que falla haga postergar un `ON` que con esa habitación no entraría (y que el `ON` salga cuando el apagado se confirma, o igual si entra), que la punta se anticipe un ciclo antes de empezar, que los switches se consulten a la vez (uno que no contesta no demora a los demás), que los `OFF` salgan a la vez y los `ON` recién cuando terminaron, que un `DETENER` que llega mientras se consultan los switches o mientras salen los `OFF` no deje salir ninguna orden más, y que una falla que dura varios ciclos se avise solo al empezar y al terminar.
 *   **`ApiRestTest`:** la API REST contra el contrato `controlador.openapi-v2.yaml`: API key, `404`/`400`/`503` con el cuerpo de error uniforme, validación completa del inventario y comandos de control.
@@ -61,7 +61,7 @@ El `engine` se prueba en capas, con el tiempo fijado por un reloj inyectable par
 *   **`RepositoriosPostgresTest`:** el SQL contra un PostgreSQL real (Testcontainers): ida y vuelta exacta del inventario, conservación del histórico al reemplazarlo, ritmo de cada termostato (mediana robusta a cortes y mensajes repetidos), que la última lectura sea la que llegó última aunque su hora simulada sea anterior (un `INICIAR` puede volver el reloj atrás), atomicidad ante una falla, fechas en UTC, uso del índice y migración de bases de versiones anteriores (incluida la que tenía la tabla de switches pendientes de apagar). Sin Docker se omite.
 *   **`MqttSubscriberServiceTest`, `SwitchClientServiceTest`, `SimuladorRegistroServiceTest`, `RelojControlTest`, `FallasActivasTest`:** la suscripción MQTT exacta a los topics declarados (también fuera de la convención), su ajuste en cada `PUT /sitio` y tras una reconexión, que se descarten los mensajes fuera del contrato del escenario F04 de `ecowarm-run` (texto que no es JSON, sin `tC`, `tC` como texto, −40 °C y 85 °C) con un solo aviso por termostato, que los bordes del rango plausible (−10 y 50 °C) sí sean lecturas, la interpretación de las respuestas del simulador, el uso del `urlSwitch` de cada habitación (o de `SWITCHES_URL`), el estado conocido que evita consultar cada switch en cada ciclo (vence a los 5 s, se actualiza con cada comando y se descarta ante una falla), que un switch que acepta la conexión y no contesta se dé por fallado al segundo (contra un servidor HTTP real que no responde), que una consulta fallida o ilegible deje como encendido lo que estaba encendido (y como desconocido lo que estaba apagado o un `OFF` que no se confirmó), el mantenimiento del registro y que los avisos de falla no se repitan en cada ciclo.
 
-## 4. Test de punta a punta (Iteración 6)
+## 4. Test de punta a punta
 `PuntaAPuntaTest` (en `modules/engine/src/test/java/com/ioteste/engine/e2e/`) levanta el engine completo (API REST, registro, suscripción MQTT, ciclo de control y base) y lo prueba desde afuera, como lo haría el simulador de la cátedra: carga el sitio con `PUT /sitio`, arranca el control con `POST /control/comandos` y mira qué comandos reciben los switches y cuándo.
 
 | Pieza | En el test |
