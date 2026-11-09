@@ -1,0 +1,135 @@
+
+ecowarm-check f3d46f4 · interop-v2 · JVM 25.0.4
+
+  1. arrancar el controlador apuntándolo a este checker
+  2. que se registre en POST http://host.docker.internal:9090/controladores  (§6)
+     — si todavía no implementa el registro: --controlador <url>
+  3. a los 180s sale el veredicto
+
+14:49:28  broker MQTT en host.docker.internal:1883
+14:49:28  API del switch y el inventario en http://localhost:9090
+14:49:28  al controlador se le informa que los switches están en http://host.docker.internal:9090
+14:49:28  exijo X-API-Key en mis endpoints
+
+14:49:29  esperando que el controlador se registre en POST http://localhost:9090/controladores
+14:49:29  (si todavía no implementa el §6: --controlador <url>)
+14:49:29  ↑ ht-room1/status/temperature:0      19.3 °C
+14:49:29  ↑ ht-room2/status/temperature:0      17.8 °C
+14:49:30  ← GET  /switches/sw-room1     → DESCONOCIDO
+14:49:30  ← GET  /switches/sw-room2     → DESCONOCIDO
+14:49:30  ← registro: 'control-grupo-3' en http://localhost:8080
+14:49:30  → PUT  /sitio             200
+14:49:30  → GET  /sitio             200
+14:49:30  → GET  /control           200
+14:49:30  → POST /control/comandos  200
+
+14:49:30  ← POST /switches/sw-room2     OFF  cambio=true
+14:49:30  ← POST /switches/sw-room1     OFF  cambio=true
+14:49:30  ← GET  /switches/sw-room2     → OFF
+14:49:30  ← GET  /switches/sw-room1     → OFF
+14:49:30  ← 'paho13367933275311' se suscribió a ht-room1/status/temperature:0
+14:49:30  ← 'paho13367933275311' se suscribió a ht-room2/status/temperature:0
+14:49:34  ↑ ht-room1/status/temperature:0      19.1 °C
+14:49:34  ↑ ht-room2/status/temperature:0      17.7 °C
+14:49:39  ↑ ht-room1/status/temperature:0      18.9 °C
+14:49:39  ↑ ht-room2/status/temperature:0      17.5 °C
+14:49:44  ↑ ht-room1/status/temperature:0      18.8 °C
+14:49:44  ↑ ht-room2/status/temperature:0      17.4 °C
+14:49:49  ↑ ht-room1/status/temperature:0      18.6 °C
+14:49:49  ↑ ht-room2/status/temperature:0      17.2 °C
+14:49:54  ↑ ht-room1/status/temperature:0      18.4 °C
+14:49:54  ↑ ht-room2/status/temperature:0      17.1 °C
+14:49:59  ↑ ht-room1/status/temperature:0      18.2 °C
+14:49:59  ↑ ht-room2/status/temperature:0      16.9 °C
+14:50:00  ← GET  /switches/sw-room1     → OFF
+14:50:00  ← GET  /switches/sw-room2     → OFF
+14:50:00  ← POST /switches/sw-room2     ON   cambio=true
+14:50:00  ← POST /switches/sw-room1     ON   cambio=true
+14:50:04  ↑ ht-room1/status/temperature:0      18.6 °C  (calentando)
+14:50:04  ↑ ht-room2/status/temperature:0      17.3 °C  (calentando)
+14:50:09  ↑ ht-room1/status/temperature:0      18.9 °C  (calentando)
+14:50:09  ↑ ht-room2/status/temperature:0      17.6 °C  (calentando)
+14:50:14  ↑ ht-room1/status/temperature:0      19.3 °C  (calentando)
+14:50:14  ↑ ht-room2/status/temperature:0      18.0 °C  (calentando)
+14:50:19  ↑ ht-room1/status/temperature:0      19.6 °C  (calentando)
+14:50:19  ↑ ht-room2/status/temperature:0      18.3 °C  (calentando)
+14:50:24  ↑ ht-room1/status/temperature:0      20.0 °C  (calentando)
+14:50:24  ↑ ht-room2/status/temperature:0      18.7 °C  (calentando)
+14:50:29  ↑ ht-room1/status/temperature:0      20.3 °C  (calentando)
+14:50:29  ↑ ht-room2/status/temperature:0      19.0 °C  (calentando)
+14:50:30  ← GET  /switches/sw-room1     → ON
+14:50:30  ← GET  /switches/sw-room2     → ON
+14:50:34  ↑ ht-room1/status/temperature:0      20.7 °C  (calentando)
+14:50:34  ↑ ht-room2/status/temperature:0      19.4 °C  (calentando)
+14:50:39  ↑ ht-room1/status/temperature:0      21.0 °C  (calentando)
+14:50:39  ↑ ht-room2/status/temperature:0      19.7 °C  (calentando)
+14:50:44  ↑ ht-room1/status/temperature:0      21.4 °C  (calentando)
+14:50:44  ↑ ht-room2/status/temperature:0      20.1 °C  (calentando)
+14:50:49  ↑ ht-room1/status/temperature:0      21.7 °C  (calentando)
+14:50:49  ↑ ht-room2/status/temperature:0      20.4 °C  (calentando)
+14:50:54  ↑ ht-room1/status/temperature:0      22.1 °C  (calentando)
+14:50:54  ↑ ht-room2/status/temperature:0      20.8 °C  (calentando)
+14:50:59  ↑ ht-room1/status/temperature:0      22.4 °C  (calentando)
+14:50:59  ↑ ht-room2/status/temperature:0      21.1 °C  (calentando)
+14:51:00  ← GET  /switches/sw-room2     → ON
+14:51:00  ← GET  /switches/sw-room1     → ON
+14:51:00  ← POST /switches/sw-room2     OFF  cambio=true
+14:51:00  ← POST /switches/sw-room1     OFF  cambio=true
+14:51:04  ↑ ht-room1/status/temperature:0      22.2 °C
+14:51:04  ↑ ht-room2/status/temperature:0      20.9 °C
+14:51:09  ↑ ht-room1/status/temperature:0      22.0 °C
+14:51:09  ↑ ht-room2/status/temperature:0      20.7 °C
+14:51:14  ↑ ht-room1/status/temperature:0      21.7 °C
+14:51:14  ↑ ht-room2/status/temperature:0      20.5 °C
+14:51:19  ↑ ht-room1/status/temperature:0      21.5 °C
+14:51:19  ↑ ht-room2/status/temperature:0      20.3 °C
+14:51:24  ↑ ht-room1/status/temperature:0      21.3 °C
+14:51:24  ↑ ht-room2/status/temperature:0      20.1 °C
+14:51:29  ↑ ht-room1/status/temperature:0      21.0 °C
+14:51:29  ↑ ht-room2/status/temperature:0      19.9 °C
+14:51:30  ← GET  /switches/sw-room2     → OFF
+14:51:30  ← GET  /switches/sw-room1     → OFF
+14:51:30  ← POST /switches/sw-room2     ON   cambio=true
+14:51:30  ← POST /switches/sw-room1     ON   cambio=true
+14:51:34  ↑ ht-room1/status/temperature:0      21.4 °C  (calentando)
+14:51:34  ↑ ht-room2/status/temperature:0      20.2 °C  (calentando)
+14:51:39  ↑ ht-room1/status/temperature:0      21.7 °C  (calentando)
+14:51:39  ↑ ht-room2/status/temperature:0      20.6 °C  (calentando)
+14:51:44  ↑ ht-room1/status/temperature:0      22.1 °C  (calentando)
+14:51:44  ↑ ht-room2/status/temperature:0      20.9 °C  (calentando)
+14:51:49  ↑ ht-room1/status/temperature:0      22.4 °C  (calentando)
+14:51:49  ↑ ht-room2/status/temperature:0      21.3 °C  (calentando)
+14:51:54  ↑ ht-room1/status/temperature:0      22.8 °C  (calentando)
+14:51:54  ↑ ht-room2/status/temperature:0      21.6 °C  (calentando)
+14:51:59  ↑ ht-room1/status/temperature:0      23.1 °C  (calentando)
+14:51:59  ↑ ht-room2/status/temperature:0      22.0 °C  (calentando)
+14:52:00  ← GET  /switches/sw-room2     → ON
+14:52:00  ← GET  /switches/sw-room1     → ON
+14:52:00  ← POST /switches/sw-room1     OFF  cambio=true
+14:52:00  ← POST /switches/sw-room2     OFF  cambio=true
+14:52:04  ↑ ht-room1/status/temperature:0      22.9 °C
+14:52:04  ↑ ht-room2/status/temperature:0      21.7 °C
+14:52:09  ↑ ht-room1/status/temperature:0      22.6 °C
+14:52:09  ↑ ht-room2/status/temperature:0      21.5 °C
+14:52:14  ↑ ht-room1/status/temperature:0      22.4 °C
+14:52:14  ↑ ht-room2/status/temperature:0      21.3 °C
+14:52:19  ↑ ht-room1/status/temperature:0      22.1 °C
+14:52:19  ↑ ht-room2/status/temperature:0      21.0 °C
+14:52:24  ↑ ht-room1/status/temperature:0      21.9 °C
+14:52:24  ↑ ht-room2/status/temperature:0      20.8 °C
+14:52:29  ↑ ht-room1/status/temperature:0      21.6 °C
+14:52:29  ↑ ht-room2/status/temperature:0      20.6 °C
+
+──────────────────────────────────────────────────────────
+Veredicto
+
+  ✓ §6    se registró ante el entorno
+  ✓ §5.1  aceptó el inventario en PUT /sitio
+  ✓ §5.1  GET /sitio devuelve lo que se le cargó
+  ✓ §5.2  respondió GET /control
+  ✓ §5.2  aceptó INICIAR
+  ✓ §2    se suscribió al topic del termostato
+  ✓ §3    comandó switches (10 comando(s))
+  ✓ §4    consultó el estado del switch (14 consulta(s))
+
+  8/8 — el controlador se comunica como manda el estándar

@@ -30,7 +30,7 @@ Los contratos están en [`docs/api/`](api/).
 
 | Día | Qué hacer | Resultado esperado |
 |---|---|---|
-| 1 | Levantar el sistema con la [puesta en marcha del README](../README.md#2-puesta-en-marcha), correr `mvn clean verify` y `ecowarm-run ... todos` | 234 tests en verde, ninguno omitido; 9 de 9 escenarios. Si algo no da, mirar los [problemas conocidos](../README.md#5-problemas-conocidos-y-cómo-resolverlos) |
+| 1 | Levantar el sistema con la [puesta en marcha del README](../README.md#2-puesta-en-marcha), correr `mvn clean verify` y `ecowarm-run ... todos` | 234 tests en verde, ninguno omitido; 9 de 9 escenarios. Para comparar, la [corrida final](tests/evidencia-final/README.md). Si algo no da, mirar los [problemas conocidos](../README.md#5-problemas-conocidos-y-cómo-resolverlos) |
 | 2 | Leer el [4+1](arquitectura/4mas1.md) en este orden: Lógica, Procesos, Física, Desarrollo y Escenarios. Después, las [decisiones](arquitectura/decisiones.md) | Saber qué hace cada pieza y por qué está hecha así |
 | 3 | Recorrer el código con la tabla de la sección 3, con un test abierto al lado de cada clase | Poder explicar un ciclo de control de punta a punta |
 | 4 y 5 | Hacer un primer cambio chico con el circuito completo (sección 4). Candidatos: R6 (soporte de Linux) o R4 (salud y reinicio) del [roadmap](arquitectura/roadmap.md#3-roadmap) | Un PR mergeado, con el CI en verde |

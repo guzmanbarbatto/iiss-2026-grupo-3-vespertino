@@ -2,7 +2,7 @@
 
 EcoWarm es el controlador de calefacción del **Grupo 3** (IISS 2026, UTEC). Cada 30 segundos de tiempo simulado decide qué habitaciones calentar según su temperatura, la potencia contratada y la tarifa punta, y comanda los calefactores con los dispositivos del estándar `interop-v2`: termostatos que publican por MQTT y switches que se manejan por HTTP. En el curso, esos dispositivos los provee el simulador de la cátedra.
 
-> **Estado al traspaso (Iteración 6, noviembre de 2026).** El controlador pasa los 9 escenarios de `ecowarm-run` sin ninguna expectativa en rojo, y fue el único de los cuatro grupos que pasó los tres escenarios que corrió el profesor el 4/11. Tiene 234 tests y el CI los corre en cada pull request. Lo que falta y las limitaciones conocidas están en [`docs/arquitectura/roadmap.md`](docs/arquitectura/roadmap.md).
+> **Estado al traspaso (Iteración 6, noviembre de 2026).** El controlador pasa los 9 escenarios de `ecowarm-run` sin ninguna expectativa en rojo y los 8 puntos del checker `ecowarm-check` ([evidencia](docs/tests/evidencia-final/README.md)), y fue el único de los cuatro grupos que pasó los tres escenarios que corrió el profesor el 4/11. Tiene 234 tests y el CI los corre en cada pull request. Lo que falta y las limitaciones conocidas están en [`docs/arquitectura/roadmap.md`](docs/arquitectura/roadmap.md).
 >
 > **Si van a tomar el proyecto, empiecen por la [guía para el equipo receptor](docs/guia-equipo-receptor.md):** qué pedir, un plan para la primera semana, un recorrido por el código y qué cuidar al cambiarlo.
 
@@ -136,7 +136,7 @@ Los que encontramos durante el desarrollo y las pruebas con la cátedra:
 
 - **Build y calidad:** `mvn clean verify` desde la raíz compila los tres módulos, corre los tests y los controles. Checkstyle aplica [`google_checks.xml`](google_checks.xml) (líneas de hasta 120 columnas, también en los tests), y una sola violación corta el build. JaCoCo exige 85 % de cobertura en `core`; el reporte está en [`docs/calidad/cobertura/index.html`](docs/calidad/cobertura/index.html). Las convenciones del equipo están en [`docs/calidad/estandares_de_codificacion.md`](docs/calidad/estandares_de_codificacion.md).
 - **Tests:** 234 (37 en `core`, 165 en `engine` y 32 en `mcp`), entre ellos un test de punta a punta con 22 escenarios, contra PostgreSQL y Mosquitto reales (Testcontainers). El criterio de cada uno está en [`docs/tests/criterio-tests.md`](docs/tests/criterio-tests.md).
-- **Validación con la cátedra:** `ecowarm-run` (paso 4 de la [puesta en marcha](#2-puesta-en-marcha)) antes de entregar.
+- **Validación con la cátedra:** `ecowarm-run` (paso 4 de la [puesta en marcha](#2-puesta-en-marcha)) antes de entregar. La última corrida, con el checker, está en [`docs/tests/evidencia-final/`](docs/tests/evidencia-final/README.md).
 - **Cómo trabajamos:**
   - Una rama por cambio desde `main`, con nombre `Sprint<N>-<Tema>`.
   - Un pull request por rama, con una descripción de qué cambia, por qué y cómo se verificó.
@@ -165,6 +165,7 @@ Los que encontramos durante el desarrollo y las pruebas con la cátedra:
 | [`docs/arquitectura/roadmap.md`](docs/arquitectura/roadmap.md) | Lo validado, las limitaciones conocidas y las prioridades | Para planificar |
 | [`docs/api/`](docs/api/) | Los contratos OpenAPI del controlador y del simulador (`interop-v2`) | Ante cualquier duda de integración |
 | [`docs/tests/criterio-tests.md`](docs/tests/criterio-tests.md) | Qué prueba cada test y por qué | Antes de tocar un test |
+| [`docs/tests/evidencia-final/`](docs/tests/evidencia-final/README.md) | La corrida final: tests, `ecowarm-run` y el checker, con sus reportes | Para comparar con una corrida propia |
 | [`docs/mcp/`](docs/mcp/) | La arquitectura y las pruebas del servidor MCP | Para trabajar en el MCP |
 | [`docs/calidad/`](docs/calidad/) | Estándares de codificación y reporte de cobertura | Al empezar a programar |
 | [`docs/vision.md`](docs/vision.md), [`docs/producto/`](docs/producto/) | Visión del producto, características, historias de usuario y escenarios | Para entender el negocio |
