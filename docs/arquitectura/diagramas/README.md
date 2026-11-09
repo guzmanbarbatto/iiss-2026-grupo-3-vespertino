@@ -5,6 +5,7 @@ Diagramas de [`4mas1.md`](../4mas1.md) escritos en [Mermaid](https://mermaid.js.
 | Fuente | Imagen | Vista |
 |---|---|---|
 | `vista-desarrollo.mmd` | `../VistaDesarrollo.png` | Desarrollo: módulos Maven, paquetes y dependencias |
+| `vista-fisica.mmd` | `../VistaFisica.png` | Física: contenedores, simulador, puertos y protocolos |
 | `vista-procesos-hilos.mmd` | `../VistaProcesosHilos.png` | Procesos: hilos del engine y lo que comparten |
 | `vista-procesos-ciclo.mmd` | `../VistaProcesosCiclo.png` | Procesos: un ciclo de control |
 
@@ -14,6 +15,7 @@ Con Node.js instalado, desde `docs/arquitectura/`:
 
 ```bash
 npx -y @mermaid-js/mermaid-cli@11.4.2 -i diagramas/vista-desarrollo.mmd -o VistaDesarrollo.png -b white -s 2
+npx -y @mermaid-js/mermaid-cli@11.4.2 -i diagramas/vista-fisica.mmd -o VistaFisica.png -b white -s 2
 npx -y @mermaid-js/mermaid-cli@11.4.2 -i diagramas/vista-procesos-hilos.mmd -o VistaProcesosHilos.png -b white -s 2
 npx -y @mermaid-js/mermaid-cli@11.4.2 -i diagramas/vista-procesos-ciclo.mmd -o VistaProcesosCiclo.png -b white -s 2
 ```
@@ -25,4 +27,4 @@ echo '{"executablePath": "C:/Program Files/Google/Chrome/Application/chrome.exe"
 npx -y @mermaid-js/mermaid-cli@11.4.2 -p puppeteer.json -i diagramas/vista-procesos-ciclo.mmd -o VistaProcesosCiclo.png -b white -s 2
 ```
 
-`vista-desarrollo.mmd` y `vista-procesos-hilos.mmd` usan el layout ELK (`layout: elk`), que ordena mejor que el de por defecto un grafo con tantos cruces. Para una vista rápida también se puede pegar el `.mmd` en [mermaid.live](https://mermaid.live).
+`vista-desarrollo.mmd`, `vista-fisica.mmd` y `vista-procesos-hilos.mmd` usan el layout ELK (`layout: elk`), que ordena mejor que el de por defecto un grafo con tantos cruces. Para una vista rápida también se puede pegar el `.mmd` en [mermaid.live](https://mermaid.live).

@@ -1,0 +1,54 @@
+---
+config:
+  layout: elk
+  flowchart:
+    wrappingWidth: 330
+---
+%% Vista Física: dónde corre cada pieza, qué puertos expone y por qué protocolo se habla con las demás.
+%% El simulador de la cátedra puede correr en la misma máquina (ecowarm-run) o en otra de la red local.
+%% Se renderiza a ../VistaFisica.png (ver docs/arquitectura/diagramas/README.md).
+flowchart TB
+    AGENTE["<b>Agente de IA</b><br/>cliente MCP (p. ej. Claude Desktop)"]
+
+    subgraph HOST["Máquina del controlador · Docker Desktop (Windows o macOS)"]
+        direction TB
+        subgraph RED["Red Docker iot-network (bridge) · docker compose"]
+            direction TB
+            MCPC["<b>ecowarm_mcp_server</b><br/>imagen ecowarm-mcp<br/>JRE 25 · puerto 8081"]
+            ENG["<b>ecowarm_engine</b><br/>imagen ecowarm-engine<br/>JRE 25 · puerto 8080"]
+            PG[("<b>iot_postgres_db</b><br/>postgres:15-alpine · puerto 5432<br/>volumen ecowarm_data")]
+        end
+        ENV[/"docker/.env<br/>claves y direcciones"/]
+    end
+
+    subgraph CATEDRA["Simulador de la cátedra · la misma máquina (ecowarm-run) u otra de la red local"]
+        direction TB
+        SIMHTTP["<b>HTTP</b> · :9090<br/>registro (§6) y switches (§3, §4)"]
+        BROKER["<b>Broker MQTT</b> · :1883"]
+        CASA["Casa simulada<br/>termostatos, switches y modelo térmico"]
+    end
+
+    AGENTE -- "SSE :8081 · X-API-Key" --> MCPC
+    MCPC -- "REST http://engine:8080" --> ENG
+    MCPC -- "JDBC postgres-db:5432<br/>(lectura)" --> PG
+    ENG -- "JDBC postgres-db:5432" --> PG
+    ENV -.- RED
+
+    ENG -- "POST /controladores (§6)<br/>GET y POST {urlSwitch}/switches (§3, §4)" --> SIMHTTP
+    SIMHTTP -- "PUT /sitio (§1) y POST /control/comandos (§5)<br/>a CONTROLADOR_BASE_URL :8080" --> ENG
+    ENG -- "suscripción a los topics<br/>del inventario (§2)" --> BROKER
+    CASA -- "publica la temperatura" --> BROKER
+    SIMHTTP --- CASA
+    MCPC -. "{urlSwitch}/switches<br/>(tools de switches)" .-> SIMHTTP
+
+    classDef contenedor fill:#e8f4fd,stroke:#2b7bb9,color:#0b2a40
+    classDef base fill:#fff4d6,stroke:#c48a00,color:#3d2b00
+    classDef externo fill:#f2f2f2,stroke:#777,color:#222
+    classDef config fill:#ffffff,stroke:#999,color:#333,stroke-dasharray: 4 3
+    class MCPC,ENG contenedor
+    class PG base
+    class SIMHTTP,BROKER,CASA,AGENTE externo
+    class ENV config
+    style HOST fill:#fafcff,stroke:#2b7bb9,color:#0b2a40
+    style RED fill:#f2f8fd,stroke:#2b7bb9,color:#0b2a40
+    style CATEDRA fill:#f8f8f8,stroke:#777,color:#222

@@ -163,6 +163,62 @@ Además, en cada ciclo:
 
 Las fuentes de los diagramas de esta vista están en [`diagramas/`](diagramas/).
 
+## 4. Vista Física
+
+Dónde corre cada pieza y cómo se comunican. El controlador se despliega con Docker Compose en una sola máquina: tres contenedores en una red `bridge`. Del otro lado está el simulador de la cátedra, que hace de casa (termostatos, switches y broker MQTT); puede correr en la misma máquina, con `ecowarm-run`, o en otra de la red local, como en las pruebas de la clase.
+
+![Despliegue del controlador y del simulador](VistaFisica.png)
+
+### Nodos
+
+| Nodo | Qué corre | Imagen o requisito | Puerto |
+|---|---|---|---|
+| `iot_postgres_db` | PostgreSQL 15: sitio, habitaciones e histórico de temperaturas | `postgres:15-alpine`, con los datos en el volumen `ecowarm_data` | 5432 |
+| `ecowarm_engine` | El controlador | `ecowarm-engine` (JRE 25 sobre Alpine) | 8080 |
+| `ecowarm_mcp_server` | El servidor MCP para agentes de IA | `ecowarm-mcp` (JRE 25 sobre Alpine) | 8081 |
+| Simulador de la cátedra | HTTP para el registro y los switches, broker MQTT y la casa simulada | `ecowarm-run.jar` (Java 21 o más) o el simulador del profesor | 9090 (HTTP) y 1883 (MQTT) por defecto |
+| Agente de IA | Un cliente MCP, por ejemplo Claude Desktop | — | Se conecta al 8081 |
+
+La máquina del controlador solo necesita Docker Desktop con Compose; Java hace falta únicamente para correr `ecowarm-run`. Como referencia de consumo: controlando 50 habitaciones a ×60, el engine usó unos 180 MB de memoria y 6 % de CPU.
+
+### Comunicaciones
+
+| De → a | Protocolo | Para qué | Dirección |
+|---|---|---|---|
+| Simulador → engine | HTTP, con la `X-API-Key` del engine | Cargar el sitio (`PUT /sitio`, §1) e iniciar o detener el control (`POST /control/comandos`, §5) | `CONTROLADOR_BASE_URL`, que el engine declara al registrarse |
+| Engine → simulador | HTTP, con la `X-API-Key` del simulador | Registrarse (§6): cada 5 s hasta lograrlo y después cada minuto, para volver a registrarse si el simulador se reinició | `SIMULADOR_URL` |
+| Engine → switches | HTTP | Consultar y comandar cada switch (§3 y §4) | El `urlSwitch` de cada habitación (o `SWITCHES_URL`) |
+| Engine → broker | MQTT | Recibir las lecturas de los topics del inventario (§2) | El broker que anuncia el simulador (o `MQTT_BROKER_URL`) |
+| Engine y MCP → PostgreSQL | JDBC | Guardar y leer el sitio y las lecturas (el MCP solo lee) | `DB_URL`: `postgres-db:5432` dentro de la red Docker |
+| MCP → engine | HTTP | Leer el sitio (`GET /sitio`) y consultar, iniciar o detener el control | `ENGINE_URL`: `http://engine:8080` |
+| Agente → MCP | HTTP con SSE, con la `X-API-Key` del MCP si se definió | Usar las tools | `http://<máquina>:8081/mcp/sse` |
+
+### Arranque
+
+* Compose levanta primero la base. El engine arranca recién cuando PostgreSQL está sano (`pg_isready`, cada 10 s) y el MCP después del engine.
+* El engine aplica `schema.sql` al arrancar: crea las tablas o actualiza las de una versión anterior, sin pasos manuales.
+* El orden respecto del simulador no importa: el engine reintenta el registro y la conexión al broker cada 5 s, y `ecowarm-run` espera hasta 5 minutos a que el controlador se registre.
+
+### Tres maneras de desplegarlo
+
+| Situación | Dónde está el simulador | Configuración en `docker/.env` |
+|---|---|---|
+| Pruebas con `ecowarm-run` | En la misma máquina, fuera de Docker | `SIMULADOR_URL=http://host.docker.internal:9090`. El runner se corre con `--host host.docker.internal` para que los `urlSwitch` y el broker que anuncia apunten a la máquina. `CONTROLADOR_BASE_URL` queda en su valor por defecto (`http://localhost:8080`) |
+| Simulador en otra máquina de la red local (la clase) | En la máquina del profesor | `SIMULADOR_URL` y `MQTT_BROKER_URL` con la IP y los puertos de esa máquina, y `CONTROLADOR_BASE_URL=http://<IP de esta máquina>:8080`, porque `localhost` para el simulador es su propia máquina. Las dos tienen que estar en la misma red; Docker Desktop instala una regla de firewall que deja entrar al 8080 incluso en una red Wi-Fi pública |
+| Demo de 10 habitaciones (`scripts/demo-10-habitaciones.sh`) | En un contenedor más | Todo dentro de Docker, en un proyecto Compose aparte (`ecowarm-demo`) con contenedores, base y puertos propios (28080, 28081, 25432 y 29090): no toca el stack real |
+
+### Datos y seguridad
+
+* Los datos viven en el volumen `ecowarm_data`: `scripts/stop.sh` los conserva y `scripts/down.sh` los borra.
+* Las claves están en `docker/.env`, que no se versiona. El engine exige `APP_API_KEY` en su API y se la declara al simulador al registrarse; con el simulador usa `SIMULADOR_API_KEY`. El MCP exige `MCP_API_KEY` solo si se define: sin ella queda abierto.
+* PostgreSQL publica el 5432 en la máquina para poder inspeccionar la base. En una red compartida queda expuesto, protegido solo por su contraseña.
+
+### Limitaciones del despliegue
+
+* **Linux:** el `docker-compose.yml` no declara `host.docker.internal`. Docker Desktop (Windows y macOS) lo resuelve solo; con Docker Engine en Linux hay que usar la IP de la máquina o agregar `extra_hosts: ["host.docker.internal:host-gateway"]` al engine y al MCP.
+* **Una sola instancia:** un engine por sitio. El reloj simulado, el estado conocido de los switches y el ciclo de control viven en memoria, así que no se puede replicar.
+* **Reinicio:** si el engine se reinicia, el sitio se conserva en la base, pero el control queda detenido hasta el próximo `INICIAR` del simulador.
+
 ## 5. Vista de Escenarios
 
 ### Escenario: ejecución acelerada del controlador
