@@ -1,5 +1,6 @@
 GROUP,PACKAGE,CLASS,INSTRUCTION_MISSED,INSTRUCTION_COVERED,BRANCH_MISSED,BRANCH_COVERED,LINE_MISSED,LINE_COVERED,COMPLEXITY_MISSED,COMPLEXITY_COVERED,METHOD_MISSED,METHOD_COVERED
-core,com.ioteste.core.service,EvaluadorCore,6,249,5,37,0,45,4,22,0,4
+core,com.ioteste.core.service,EvaluadorCore.BusquedaDeCombinacion,0,169,1,15,0,31,1,10,0,3
+core,com.ioteste.core.service,EvaluadorCore,6,412,4,50,0,74,3,35,0,10
 core,com.ioteste.core.domain,AccionSwitch,0,15,0,0,0,3,0,1,0,1
 core,com.ioteste.core.domain,TarifaPunta,0,12,0,0,0,1,0,1,0,1
 core,com.ioteste.core.domain,Salida,0,6,0,0,0,1,0,1,0,1

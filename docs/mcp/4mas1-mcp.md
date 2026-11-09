@@ -144,9 +144,9 @@ El servidor MCP se despliega como un contenedor Docker independiente (`ecowarm_m
 
 ```mermaid
 flowchart TB
-    subgraph HOST["Host (Windows / Linux)"]
+    subgraph HOST["Host con Docker Desktop (Windows o macOS)"]
         INSP["MCP Inspector / Agente IA<br/>localhost:6274"]
-        SIMHOST["Simulador Cátedra (ecowarm-check.jar)<br/>REST :9090 | MQTT :1883"]
+        SIMHOST["Simulador Cátedra (ecowarm-run.jar)<br/>REST :9090 | MQTT :1883"]
         subgraph DOCKER["Red Docker: iot-network"]
             MCP["ecowarm_mcp_server<br/>Puerto 8081:8081"]
             ENG["ecowarm_engine<br/>Puerto 8080:8080"]

@@ -253,7 +253,7 @@ La máquina del controlador solo necesita Docker Desktop con Compose; Java hace 
 **Objetivo:** evitar que el controlador tome decisiones de calefacción basándose en lecturas que considera demasiado antiguas.
 
 - El motor inicia un ciclo de evaluación y consulta la última lectura de temperatura registrada para cada habitación.
-- Si no existe una lectura, o el termostato no publica desde hace más de 600 segundos simulados (o, si eso es más, desde hace 3 lecturas perdidas: el engine mide cada cuánto publica cada termostato con la mediana de los huecos entre sus últimas 5 lecturas, así que con aceleración alta no da por vencidas lecturas que todavía no les tocaba llegar), `EvaluadorJobService` utiliza el valor de respaldo `99.0 °C` como temperatura actual.
+- Si no existe una lectura, o el termostato no publica desde hace más de 600 segundos simulados (o, si eso es más, desde hace 3 lecturas perdidas: el engine mide cada cuánto publica cada termostato con la mediana de los huecos entre sus últimas 5 lecturas, así que con aceleración alta no da por vencidas lecturas que todavía no les tocaba llegar), `EvaluadorJobService` utiliza el valor de respaldo `99.0 °C` como temperatura actual. Un termostato que publica mensajes fuera del contrato (no es JSON, sin `tC`, `tC` como texto o fuera de −10 a 50 °C) cuenta como callado: esos mensajes no son lecturas.
 - El servicio construye el `HabitacionDTO` con los datos de la habitación y lo entrega a `EvaluadorCore`.
 - El Core compara la temperatura actual recibida con la temperatura esperada y aplica sus reglas de control.
 - Fuera del horario de tarifa punta, si el switch está encendido y la temperatura de respaldo supera la esperada, el Core genera una orden `OFF`.

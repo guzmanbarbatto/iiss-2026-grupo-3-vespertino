@@ -57,6 +57,8 @@ El servidor registra automáticamente las siguientes 7 herramientas mediante `Me
 
 Las siguientes pruebas fueron ejecutadas levantando la infraestructura completa en Docker (`postgres-db`, `ecowarm_engine` y `ecowarm_mcp_server`), el verificador/simulador oficial de la cátedra (`ecowarm-check.jar`) y el cliente interactivo **MCP Inspector v2.13.0** conectado por SSE a `http://localhost:8081/mcp/sse`.
 
+> Esta evidencia se tomó con `ecowarm-check.jar`, el simulador de la cátedra en ese momento. Hoy la cátedra usa `ecowarm-run.jar` (ver el [README](../../README.md#2-puesta-en-marcha)). Después de esta evidencia, el MCP cambió en los PR #20 y #22: CORS restringido a `localhost`, fechas en UTC, cada switch en el `urlSwitch` de su habitación y la última lectura por hora de llegada. Las tools hacen lo mismo, y esos cambios los cubren los tests automatizados de la sección 4.
+
 ---
 
 ### 3.1 Prueba 1: Consulta de Estado Integral (`consultarEstadoHabitaciones`)
