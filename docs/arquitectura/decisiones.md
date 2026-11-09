@@ -103,7 +103,7 @@ Cada decisión indica cuándo se tomó (iteración y PR) y si sigue vigente. Las
 - **Contexto:** después de registrarse, el engine verifica cada minuto, con el listado `GET /controladores`, que el simulador lo siga conociendo. Ese listado no está en el estándar, y si el simulador no lo ofrece, el engine daba el registro por vigente. Con el checker de la cátedra (`ecowarm-check`), que contesta `404`, un simulador nuevo nunca lo conocía: el checker dio 1 de 8.
 - **Decisión:** si el simulador rechaza la conexión (no está corriendo), cuando vuelve a responder el engine se registra de nuevo sin preguntar. El alta es idempotente por etiqueta (§6), así que repetirla no deja registros duplicados. Un timeout o un error HTTP no cuentan, porque ese simulador sigue corriendo.
 - **Alternativas descartadas:** registrarse de nuevo cada minuto. El `ecowarm-run` arranca su corrida cuando el controlador se registra, así que un registro repetido podría reiniciarla a la mitad.
-- **Consecuencias:** un simulador que se reinicia conoce al engine a los 5 s de volver, ofrezca o no el listado. Si se reinicia entre dos verificaciones y no ofrece el listado, el engine no lo nota ([L18](roadmap.md)).
+- **Consecuencias:** con `ecowarm-run`, que ofrece el listado, nada cambia. Un simulador que se reinicia conoce al engine a los 5 s de volver, ofrezca o no el listado. Si se reinicia entre dos verificaciones y no ofrece el listado, el engine no lo nota ([L18](roadmap.md)).
 
 ## Persistencia
 
